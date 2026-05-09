@@ -5,3 +5,4 @@ CREATE TABLE albums (
     release_date DATE,
     cover_image_url TEXT,
     created_at  TIMESTAMPTZ DEFAULT now()
+);
