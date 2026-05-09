@@ -32,21 +32,27 @@ func main() {
 		logger.Error("Failed to connect to database", "error", err)
 		return
 	}
+
+	if err := db.Ping(); err != nil {
+		logger.Error("Failed to ping database", "error", err)
+		return
+	}
+
 	defer db.Close()
 
 	// Start the server on cfg.Addr
 
 	//init repo
-	artistRepo := repository.NewArtistRepository(db)
+	artistRepo := repository.NewArtistRepository(db, logger)
 
 	//init service
-	artistService := service.NewArtistService(artistRepo)
+	artistService := service.NewArtistService(artistRepo, logger)
 
 	//init handlers
-	artistHandler := handlers.NewArtistHandler(artistService)
+	artistHandler := handlers.NewArtistHandler(artistService, logger)
 
 	//init router
-	router := api.NewRouter(artistHandler)
+	router := api.NewRouter(artistHandler, logger)
 
 	logger.Info("Server is running on " + cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, router); err != nil {
