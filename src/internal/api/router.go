@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"mydal/src/internal/api/handlers" // Adjust to match your go.mod module path
 	"net/http"
 
@@ -10,13 +11,15 @@ import (
 type Router struct {
 	Mux           *mux.Router
 	artistHandler *handlers.ArtistHandler
+	Logger        *slog.Logger
 	// Add other handlers: albumHandler, playlistHandler, etc.
 }
 
-func NewRouter(artistHandler *handlers.ArtistHandler /*, other handlers */) *Router {
+func NewRouter(artistHandler *handlers.ArtistHandler, logger *slog.Logger /*, other handlers */) *Router {
 	r := &Router{
 		Mux:           mux.NewRouter(),
 		artistHandler: artistHandler,
+		Logger:        logger,
 		// Initialize other handlers
 	}
 	//Which port
