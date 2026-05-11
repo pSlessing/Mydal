@@ -11,6 +11,7 @@ type Config struct {
 	MinioUseSSL    bool
 	BucketName     string
 	LogLevel       string
+	Mode           string
 }
 
 func Load() Config {
@@ -23,5 +24,6 @@ func Load() Config {
 		MinioUseSSL:    os.Getenv("MINIO_USE_SSL") == "true",
 		BucketName:     os.Getenv("BUCKET_NAME"),
 		LogLevel:       os.Getenv("LOG_LEVEL"),
+		Mode:           os.Getenv("MODE"),
 	}
 }

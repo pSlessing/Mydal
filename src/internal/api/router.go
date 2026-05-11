@@ -11,14 +11,16 @@ import (
 type Router struct {
 	Mux           *mux.Router
 	artistHandler *handlers.ArtistHandler
+	trackHandler  *handlers.TrackHandler
 	Logger        *slog.Logger
 	// Add other handlers: albumHandler, playlistHandler, etc.
 }
 
-func NewRouter(artistHandler *handlers.ArtistHandler, logger *slog.Logger /*, other handlers */) *Router {
+func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, logger *slog.Logger /*, other handlers */) *Router {
 	r := &Router{
 		Mux:           mux.NewRouter(),
 		artistHandler: artistHandler,
+		trackHandler:  trackHandler,
 		Logger:        logger,
 		// Initialize other handlers
 	}
@@ -35,6 +37,10 @@ func (r *Router) registerRoutes() {
 
 	// Add similar routes for albums, playlists, tracks, etc.
 	// Example: r.Mux.HandleFunc("/albums", r.albumHandler.GetAlbums).Methods("GET")
+
+	r.Mux.HandleFunc("/tracks", r.trackHandler.CreateTrack).Methods("POST")
+	r.Mux.HandleFunc("/tracks/{id}", r.trackHandler.GetTrack).Methods("GET")
+	r.Mux.HandleFunc("/tracks/{id}", r.trackHandler.DeleteTrack).Methods("DELETE")
 
 	// Optional: Add middleware (e.g., logging)
 	r.Mux.Use(loggingMiddleware)

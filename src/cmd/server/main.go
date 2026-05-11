@@ -8,9 +8,12 @@ import (
 	"mydal/src/internal/repository"
 	"mydal/src/internal/service"
 	"net/http"
+	"net/url"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 func main() {
@@ -26,13 +29,25 @@ func main() {
 	cfg := pkg.Load()
 	logger.Debug("Configuration loaded", "config", cfg)
 	// Initialize database connection, etc. here using cfg.DatabaseURL
-	// For example:
-	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	var db *sql.DB
+
+	u, err := url.Parse(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("Failed to parse database URL", "error", err)
+		return
+	}
+	if cfg.Mode != "production" {
+		q := u.Query()
+		q.Set("sslmode", "disable")
+		u.RawQuery = q.Encode()
+	}
+	dbURL := u.String()
+
+	db, err = sql.Open("postgres", dbURL)
 	if err != nil {
 		logger.Error("Failed to connect to database", "error", err)
 		return
 	}
-
 	if err := db.Ping(); err != nil {
 		logger.Error("Failed to ping database", "error", err)
 		return
@@ -42,17 +57,32 @@ func main() {
 
 	// Start the server on cfg.Addr
 
+	// Initialize MinIO client
+	minioClient, err := minio.New(cfg.MinioEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
+		Secure: cfg.MinioUseSSL,
+	})
+	if err != nil {
+		logger.Error("Failed to initialize MinIO client", "error", err)
+		return
+	}
+
 	//init repo
 	artistRepo := repository.NewArtistRepository(db, logger)
+	trackRepo := repository.NewTrackRepository(db, logger)
+	minioRepo := repository.NewMiniorepo(minioClient, logger)
 
 	//init service
 	artistService := service.NewArtistService(artistRepo, logger)
+	minioService := service.NewMinioservice(minioRepo, logger)
+	trackService := service.NewTrackService(trackRepo, logger)
 
 	//init handlers
 	artistHandler := handlers.NewArtistHandler(artistService, logger)
+	trackHandler := handlers.NewTrackHandler(trackService, minioService, logger)
 
 	//init router
-	router := api.NewRouter(artistHandler, logger)
+	router := api.NewRouter(artistHandler, trackHandler, logger)
 
 	logger.Info("Server is running on " + cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, router); err != nil {
