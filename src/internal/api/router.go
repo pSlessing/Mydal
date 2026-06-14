@@ -11,22 +11,24 @@ import (
 )
 
 type Router struct {
-	mux           *http.ServeMux
-	artistHandler *handlers.ArtistHandler
-	trackHandler  *handlers.TrackHandler
-	albumHandler  *handlers.AlbumHandler
-	streamHandler *handlers.StreamHandler
-	logger        *slog.Logger
+	mux              *http.ServeMux
+	artistHandler    *handlers.ArtistHandler
+	trackHandler     *handlers.TrackHandler
+	albumHandler     *handlers.AlbumHandler
+	streamHandler    *handlers.StreamHandler
+	playlistHandler  *handlers.PlaylistHandler
+	logger           *slog.Logger
 }
 
-func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, logger *slog.Logger) *Router {
+func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, playlistHandler *handlers.PlaylistHandler, logger *slog.Logger) *Router {
 	r := &Router{
-		mux:           http.NewServeMux(),
-		artistHandler: artistHandler,
-		trackHandler:  trackHandler,
-		albumHandler:  albumHandler,
-		streamHandler: streamHandler,
-		logger:        logger,
+		mux:              http.NewServeMux(),
+		artistHandler:    artistHandler,
+		trackHandler:     trackHandler,
+		albumHandler:     albumHandler,
+		streamHandler:    streamHandler,
+		playlistHandler:  playlistHandler,
+		logger:           logger,
 	}
 	r.registerRoutes()
 	return r
@@ -47,6 +49,12 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("DELETE /albums/{id}", r.albumHandler.DeleteAlbum)
 
 	r.mux.HandleFunc("GET /tracks/{id}/stream", r.streamHandler.StreamTrack)
+
+	r.mux.HandleFunc("POST /playlists", r.playlistHandler.CreatePlaylist)
+	r.mux.HandleFunc("GET /playlists/{id}", r.playlistHandler.GetPlaylist)
+	r.mux.HandleFunc("DELETE /playlists/{id}", r.playlistHandler.DeletePlaylist)
+	r.mux.HandleFunc("PUT /playlists/{id}/tracks/{trackId}", r.playlistHandler.AddTrackToPlaylist)
+	r.mux.HandleFunc("DELETE /playlists/{id}/tracks/{trackId}", r.playlistHandler.RemoveTrackFromPlaylist)
 
 	r.mux.Handle("GET /swagger/", httpSwagger.Handler())
 }

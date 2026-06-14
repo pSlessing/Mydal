@@ -20,6 +20,21 @@ definitions:
       name:
         type: string
     type: object
+  mydal_src_internal_domain.Playlist:
+    properties:
+      createdAt:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      songIDs:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
   mydal_src_internal_domain.Track:
     properties:
       album:
@@ -229,6 +244,136 @@ paths:
       summary: Get artist by ID
       tags:
       - artists
+  /playlists:
+    post:
+      consumes:
+      - application/json
+      description: Add a new playlist to the database
+      parameters:
+      - description: Playlist payload
+        in: body
+        name: playlist
+        required: true
+        schema:
+          $ref: '#/definitions/mydal_src_internal_domain.Playlist'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/mydal_src_internal_domain.Playlist'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new playlist
+      tags:
+      - playlists
+  /playlists/{id}:
+    delete:
+      description: Remove a playlist from the database by ID
+      parameters:
+      - description: Playlist ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a playlist
+      tags:
+      - playlists
+    get:
+      description: Retrieve a single playlist by its unique identifier
+      parameters:
+      - description: Playlist ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mydal_src_internal_domain.Playlist'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get playlist by ID
+      tags:
+      - playlists
+  /playlists/{id}/tracks/{trackId}:
+    delete:
+      description: Remove a track from an existing playlist
+      parameters:
+      - description: Playlist ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Track ID
+        in: path
+        name: trackId
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Remove track from playlist
+      tags:
+      - playlists
+    put:
+      description: Add an existing track to an existing playlist
+      parameters:
+      - description: Playlist ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Track ID
+        in: path
+        name: trackId
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Add track to playlist
+      tags:
+      - playlists
   /tracks:
     post:
       consumes:

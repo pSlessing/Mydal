@@ -3,9 +3,9 @@ package domain
 import "time"
 
 type Playlist struct {
-	ID        string
-	Name      string
-	Tracks    []Track
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          string
+	Title       string
+	Description string
+	SongIDs     []string
+	CreatedAt   time.Time
 }
