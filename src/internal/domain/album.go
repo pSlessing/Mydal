@@ -5,4 +5,5 @@ type Album struct {
 	Title       string
 	ReleaseYear int
 	CoverKey    string
+	ArtistID    string
 }
