@@ -1,0 +1,79 @@
+name: Swagger Docs
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build project
+        run: go build ./...
+
+      - name: Install swag CLI
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Generate swagger docs
+        working-directory: src
+        run: swag init --generalInfo cmd/server/main.go --output cmd/server/docs
+
+      - name: Upload swagger artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swagger-docs
+          path: src/cmd/server/docs/
+
+      - name: Prepare GitHub Pages artifact
+        run: |
+          mkdir -p _site
+          cp src/cmd/server/docs/swagger.json _site/
+          cp src/cmd/server/docs/swagger.yaml _site/
+          cat > _site/index.html << 'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Mydal API</title>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
+          </head>
+          <body>
+            <div id="swagger-ui"></div>
+            <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+            <script>
+              SwaggerUIBundle({ url: "./swagger.json", dom_id: "#swagger-ui" })
+            </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
