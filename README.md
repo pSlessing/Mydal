@@ -2,6 +2,9 @@
 
 A music library management and streaming backend.
 
+See the backend at:
+https://pslessing.github.io/Mydal/
+
 ## Prerequisites
 
 - Go 1.25+
