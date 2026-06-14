@@ -25,7 +25,7 @@ jobs:
 
       - name: Generate swagger docs
         working-directory: src
-        run: swag init --generalInfo cmd/server/main.go --output cmd/server/docs
+        run: swag init --generalInfo cmd/server/main.go --output cmd/server/docs --parseDependency --parseInternal
 
       - name: Upload swagger artifact
         uses: actions/upload-artifact@v4
