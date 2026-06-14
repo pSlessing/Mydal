@@ -18,9 +18,9 @@ func NewMinioservice(minioRepo *repository.Miniorepo, logger *slog.Logger) *Mini
 	return &Minioservice{minioRepo: minioRepo, logger: logger}
 }
 
-func (s *Minioservice) UploadTrack(ctx context.Context, bucket, key, contentType string, size int64, reader io.Reader) error {
-	returnVal, err := s.minioRepo.PutObject(ctx, bucket, key, reader, size, &minio.PutObjectOptions{ContentType: contentType})
-	s.logger.Info("Uploaded track to MinIO", "bucket", bucket, "key", key, "size", size, "uploadInfo", returnVal)
+func (s *Minioservice) UploadTrack(ctx context.Context, key, contentType string, size int64, reader io.Reader) error {
+	returnVal, err := s.minioRepo.PutObject(ctx, key, reader, size, &minio.PutObjectOptions{ContentType: contentType})
+	s.logger.Info("Uploaded track to MinIO", "bucket", "key", key, "size", size, "uploadInfo", returnVal)
 	return err
 }
 

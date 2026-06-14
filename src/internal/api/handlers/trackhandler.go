@@ -75,7 +75,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	ext := extensionFromContentType(contentType)
 	storageKey := fmt.Sprintf("tracks/%s%s", id, ext)
 
-	if err := h.minioService.UploadTrack(r.Context(), "mydal", storageKey, contentType, size, r.Body); err != nil {
+	if err := h.minioService.UploadTrack(r.Context(), storageKey, contentType, size, r.Body); err != nil {
 		h.logger.Error("Failed to upload track file", "error", err)
 		http.Error(w, "Failed to upload file", http.StatusInternalServerError)
 		return

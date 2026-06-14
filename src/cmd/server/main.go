@@ -70,7 +70,7 @@ func main() {
 	//init repo
 	artistRepo := repository.NewArtistRepository(db, logger)
 	trackRepo := repository.NewTrackRepository(db, logger)
-	minioRepo := repository.NewMiniorepo(minioClient, logger)
+	minioRepo := repository.NewMiniorepo(minioClient, logger, cfg.BucketName)
 	albumRepo := repository.NewAlbumRepository(db, logger)
 
 	//init service

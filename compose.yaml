@@ -8,6 +8,7 @@ services:
       SSL_MODE: disable
     ports: ["5432:5432"]
   bucket:
+    container_name: mydal
     image: minio/minio
     command: server /data
     environment:
