@@ -39,3 +39,11 @@ func (r *TrackRepository) DeleteTrack(id string) error {
 	}
 	return err
 }
+
+func (r *TrackRepository) UpdateStorageKey(id, storageKey string) error {
+	_, err := r.db.Exec("UPDATE tracks SET storage_key = $1 WHERE id = $2", storageKey, id)
+	if err != nil {
+		r.logger.Error("Failed to update storage key", "error", err)
+	}
+	return err
+}

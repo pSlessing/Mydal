@@ -12,15 +12,19 @@ type Router struct {
 	Mux           *mux.Router
 	artistHandler *handlers.ArtistHandler
 	trackHandler  *handlers.TrackHandler
+	albumHandler  *handlers.AlbumHandler
+	streamHandler *handlers.StreamHandler
 	Logger        *slog.Logger
-	// Add other handlers: albumHandler, playlistHandler, etc.
+	// Add other handlers: playlistHandler, etc.
 }
 
-func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, logger *slog.Logger /*, other handlers */) *Router {
+func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, logger *slog.Logger /*, other handlers */) *Router {
 	r := &Router{
 		Mux:           mux.NewRouter(),
 		artistHandler: artistHandler,
 		trackHandler:  trackHandler,
+		albumHandler:  albumHandler,
+		streamHandler: streamHandler,
 		Logger:        logger,
 		// Initialize other handlers
 	}

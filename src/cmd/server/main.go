@@ -71,18 +71,22 @@ func main() {
 	artistRepo := repository.NewArtistRepository(db, logger)
 	trackRepo := repository.NewTrackRepository(db, logger)
 	minioRepo := repository.NewMiniorepo(minioClient, logger)
+	albumRepo := repository.NewAlbumRepository(db, logger)
 
 	//init service
 	artistService := service.NewArtistService(artistRepo, logger)
 	minioService := service.NewMinioservice(minioRepo, logger)
 	trackService := service.NewTrackService(trackRepo, logger)
+	albumService := service.NewAlbumService(albumRepo, logger)
 
 	//init handlers
 	artistHandler := handlers.NewArtistHandler(artistService, logger)
 	trackHandler := handlers.NewTrackHandler(trackService, minioService, logger)
+	albumHandler := handlers.NewAlbumHandler(albumService, logger)
+	streamHandler := handlers.NewStreamHandler(trackService, minioService, logger)
 
 	//init router
-	router := api.NewRouter(artistHandler, trackHandler, logger)
+	router := api.NewRouter(artistHandler, trackHandler, albumHandler, streamHandler, logger)
 
 	logger.Info("Server is running on " + cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, router); err != nil {
