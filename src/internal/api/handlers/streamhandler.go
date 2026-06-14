@@ -20,6 +20,16 @@ func NewStreamHandler(trackService *service.TrackService, minioService *service.
 	}
 }
 
+// StreamTrack streams an audio track file
+// @Summary      Stream track audio
+// @Description  Stream the audio file for a track via HTTP range requests
+// @Tags         streaming
+// @Produce      audio/*
+// @Param        id   path      string  true  "Track ID"
+// @Success      200  {file}    binary
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /tracks/{id}/stream [get]
 func (h *StreamHandler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 

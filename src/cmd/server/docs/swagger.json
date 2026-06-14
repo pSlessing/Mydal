@@ -1,0 +1,571 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Music library management and streaming API",
+        "title": "Mydal API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/albums": {
+            "post": {
+                "description": "Add a new album to the database",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "albums"
+                ],
+                "summary": "Create a new album",
+                "parameters": [
+                    {
+                        "description": "Album payload",
+                        "name": "album",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/albums/{id}": {
+            "get": {
+                "description": "Retrieve a single album by its unique identifier",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "albums"
+                ],
+                "summary": "Get album by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Album ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Remove an album from the database by ID",
+                "tags": [
+                    "albums"
+                ],
+                "summary": "Delete an album",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Album ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/artists": {
+            "post": {
+                "description": "Add a new artist to the database",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "artists"
+                ],
+                "summary": "Create a new artist",
+                "parameters": [
+                    {
+                        "description": "Artist payload",
+                        "name": "artist",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/artists/{id}": {
+            "get": {
+                "description": "Retrieve a single artist by their unique identifier",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "artists"
+                ],
+                "summary": "Get artist by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Artist ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Remove an artist from the database by ID",
+                "tags": [
+                    "artists"
+                ],
+                "summary": "Delete an artist",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Artist ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tracks": {
+            "post": {
+                "description": "Add a new track to the database",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tracks"
+                ],
+                "summary": "Create a new track",
+                "parameters": [
+                    {
+                        "description": "Track payload",
+                        "name": "track",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tracks/{id}": {
+            "get": {
+                "description": "Retrieve a single track by its unique identifier",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tracks"
+                ],
+                "summary": "Get track by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Track ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Remove a track from the database by ID",
+                "tags": [
+                    "tracks"
+                ],
+                "summary": "Delete a track",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Track ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tracks/{id}/file": {
+            "put": {
+                "description": "Upload the audio binary for an existing track. Content-Type must be an audio MIME type.",
+                "consumes": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "tracks"
+                ],
+                "summary": "Upload track audio file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Track ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Audio file binary",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tracks/{id}/stream": {
+            "get": {
+                "description": "Stream the audio file for a track via HTTP range requests",
+                "produces": [
+                    "audio/*"
+                ],
+                "tags": [
+                    "streaming"
+                ],
+                "summary": "Stream track audio",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Track ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "mydal_src_internal_domain.Album": {
+            "type": "object",
+            "properties": {
+                "artistID": {
+                    "type": "string"
+                },
+                "coverKey": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "releaseYear": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "mydal_src_internal_domain.Artist": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "mydal_src_internal_domain.Track": {
+            "type": "object",
+            "properties": {
+                "album": {
+                    "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                },
+                "artist": {
+                    "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                },
+                "bitrate": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "duration": {
+                    "$ref": "#/definitions/time.Duration"
+                },
+                "format": {
+                    "description": "\"flac\", \"mp3\", etc.",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "storageKey": {
+                    "description": "path in S3 or local fs",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "time.Duration": {
+            "type": "integer",
+            "format": "int64",
+            "enum": [
+                -9223372036854775808,
+                9223372036854775807,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000
+            ],
+            "x-enum-varnames": [
+                "minDuration",
+                "maxDuration",
+                "Nanosecond",
+                "Microsecond",
+                "Millisecond",
+                "Second",
+                "Minute",
+                "Hour"
+            ]
+        }
+    }
+}

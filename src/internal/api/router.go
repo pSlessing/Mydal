@@ -2,62 +2,55 @@ package api
 
 import (
 	"log/slog"
-	"mydal/src/internal/api/handlers" // Adjust to match your go.mod module path
+	"mydal/src/internal/api/handlers"
 	"net/http"
 
-	"github.com/gorilla/mux" // Add this import after installing
+	_ "mydal/src/cmd/server/docs"
+
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 type Router struct {
-	Mux           *mux.Router
+	mux           *http.ServeMux
 	artistHandler *handlers.ArtistHandler
 	trackHandler  *handlers.TrackHandler
 	albumHandler  *handlers.AlbumHandler
 	streamHandler *handlers.StreamHandler
-	Logger        *slog.Logger
-	// Add other handlers: playlistHandler, etc.
+	logger        *slog.Logger
 }
 
-func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, logger *slog.Logger /*, other handlers */) *Router {
+func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, logger *slog.Logger) *Router {
 	r := &Router{
-		Mux:           mux.NewRouter(),
+		mux:           http.NewServeMux(),
 		artistHandler: artistHandler,
 		trackHandler:  trackHandler,
 		albumHandler:  albumHandler,
 		streamHandler: streamHandler,
-		Logger:        logger,
-		// Initialize other handlers
+		logger:        logger,
 	}
-	//Which port
 	r.registerRoutes()
 	return r
 }
 
 func (r *Router) registerRoutes() {
-	// Artist routes
-	r.Mux.HandleFunc("/artists", r.artistHandler.CreateArtist).Methods("POST")
-	r.Mux.HandleFunc("/artists/{id}", r.artistHandler.GetArtist).Methods("GET")
-	r.Mux.HandleFunc("/artists/{id}", r.artistHandler.DeleteArtist).Methods("DELETE")
+	r.mux.HandleFunc("POST /artists", r.artistHandler.CreateArtist)
+	r.mux.HandleFunc("GET /artists/{id}", r.artistHandler.GetArtist)
+	r.mux.HandleFunc("DELETE /artists/{id}", r.artistHandler.DeleteArtist)
 
-	// Add similar routes for albums, playlists, tracks, etc.
-	// Example: r.Mux.HandleFunc("/albums", r.albumHandler.GetAlbums).Methods("GET")
+	r.mux.HandleFunc("POST /tracks", r.trackHandler.CreateTrack)
+	r.mux.HandleFunc("GET /tracks/{id}", r.trackHandler.GetTrack)
+	r.mux.HandleFunc("DELETE /tracks/{id}", r.trackHandler.DeleteTrack)
+	r.mux.HandleFunc("PUT /tracks/{id}/file", r.trackHandler.UploadTrackFile)
 
-	r.Mux.HandleFunc("/tracks", r.trackHandler.CreateTrack).Methods("POST")
-	r.Mux.HandleFunc("/tracks/{id}", r.trackHandler.GetTrack).Methods("GET")
-	r.Mux.HandleFunc("/tracks/{id}", r.trackHandler.DeleteTrack).Methods("DELETE")
+	r.mux.HandleFunc("POST /albums", r.albumHandler.CreateAlbum)
+	r.mux.HandleFunc("GET /albums/{id}", r.albumHandler.GetAlbum)
+	r.mux.HandleFunc("DELETE /albums/{id}", r.albumHandler.DeleteAlbum)
 
-	// Optional: Add middleware (e.g., logging)
-	r.Mux.Use(loggingMiddleware)
+	r.mux.HandleFunc("GET /tracks/{id}/stream", r.streamHandler.StreamTrack)
+
+	r.mux.Handle("GET /swagger/", httpSwagger.Handler())
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	r.Mux.ServeHTTP(w, req)
-}
-
-// Example middleware (implement as needed)
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Log request details
-		next.ServeHTTP(w, r)
-	})
+	r.mux.ServeHTTP(w, req)
 }

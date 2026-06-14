@@ -1,3 +1,9 @@
+// @title           Mydal API
+// @version         1.0
+// @description     Music library management and streaming API
+// @host            localhost:8080
+// @BasePath        /
+
 package main
 
 import (

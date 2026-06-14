@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"mydal/src/internal/repository"
+	"strconv"
 
 	"github.com/minio/minio-go/v7"
 )
@@ -20,7 +21,7 @@ func NewMinioservice(minioRepo *repository.Miniorepo, logger *slog.Logger) *Mini
 
 func (s *Minioservice) UploadTrack(ctx context.Context, key, contentType string, size int64, reader io.Reader) error {
 	returnVal, err := s.minioRepo.PutObject(ctx, key, reader, size, &minio.PutObjectOptions{ContentType: contentType})
-	s.logger.Info("Uploaded track to MinIO", "bucket", "key", key, "size", size, "uploadInfo", returnVal)
+	s.logger.Info("Uploaded track to MinIO", "bucket", "key", key, "size", strconv.Itoa(int(size)), "uploadInfo", returnVal)
 	return err
 }
 
