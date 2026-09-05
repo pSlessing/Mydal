@@ -1,4 +1,4 @@
-package pkg
+package httpx
 
 import (
 	"encoding/json"

@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
-	"mydal/src/internal/pkg"
+	"mydal/src/internal/httpx"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -117,7 +117,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 				if tracker, ok := w.(headerTracker); ok && tracker.headerWritten() {
 					return
 				}
-				pkg.RespondWithError(w, http.StatusInternalServerError, "internal server error")
+				httpx.RespondWithError(w, http.StatusInternalServerError, "internal server error")
 			}()
 			next.ServeHTTP(w, r)
 		})

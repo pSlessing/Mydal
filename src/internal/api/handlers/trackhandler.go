@@ -6,21 +6,18 @@ import (
 	"log/slog"
 	"mydal/src/internal/domain"
 	"mydal/src/internal/service"
+	"mydal/src/internal/storage"
 	"net/http"
 )
 
 type TrackHandler struct {
 	trackService *service.TrackService
-	minioService *service.Minioservice
+	blobs        storage.BlobStore
 	logger       *slog.Logger
 }
 
-func NewTrackHandler(trackService *service.TrackService, minioService *service.Minioservice, logger *slog.Logger) *TrackHandler {
-	return &TrackHandler{
-		trackService: trackService,
-		minioService: minioService,
-		logger:       logger,
-	}
+func NewTrackHandler(trackService *service.TrackService, blobs storage.BlobStore, logger *slog.Logger) *TrackHandler {
+	return &TrackHandler{trackService: trackService, blobs: blobs, logger: logger}
 }
 
 // GetTrack retrieves a track by ID
@@ -107,7 +104,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	ext := extensionFromContentType(contentType)
 	storageKey := fmt.Sprintf("tracks/%s%s", id, ext)
 
-	if err := h.minioService.UploadTrack(r.Context(), storageKey, contentType, size, r.Body); err != nil {
+	if err := h.blobs.Put(r.Context(), storageKey, r.Body, size, contentType); err != nil {
 		h.logger.Error("Failed to upload track file", "error", err)
 		http.Error(w, "Failed to upload file", http.StatusInternalServerError)
 		return

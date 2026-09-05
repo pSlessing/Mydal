@@ -1,23 +1,22 @@
 package handlers
 
 import (
+	"io"
 	"log/slog"
 	"mydal/src/internal/service"
+	"mydal/src/internal/storage"
 	"net/http"
+	"strconv"
 )
 
 type StreamHandler struct {
 	trackService *service.TrackService
-	minioService *service.Minioservice
+	blobs        storage.BlobStore
 	logger       *slog.Logger
 }
 
-func NewStreamHandler(trackService *service.TrackService, minioService *service.Minioservice, logger *slog.Logger) *StreamHandler {
-	return &StreamHandler{
-		trackService: trackService,
-		minioService: minioService,
-		logger:       logger,
-	}
+func NewStreamHandler(trackService *service.TrackService, blobs storage.BlobStore, logger *slog.Logger) *StreamHandler {
+	return &StreamHandler{trackService: trackService, blobs: blobs, logger: logger}
 }
 
 // StreamTrack streams an audio track file
@@ -43,22 +42,32 @@ func (h *StreamHandler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	obj, err := h.minioService.GetTrackObject(r.Context(), "mydal", track.StorageKey)
+	info, err := h.blobs.Stat(r.Context(), track.StorageKey)
+	if err != nil {
+		h.logger.Error("Failed to stat track object", "error", err)
+		http.Error(w, "Failed to retrieve track", http.StatusInternalServerError)
+		return
+	}
+
+	body, err := h.blobs.Get(r.Context(), track.StorageKey)
 	if err != nil {
 		h.logger.Error("Failed to retrieve track object", "error", err)
 		http.Error(w, "Failed to retrieve track", http.StatusInternalServerError)
 		return
 	}
-	defer obj.Close()
+	defer body.Close()
 
-	stat, err := obj.Stat()
-	if err != nil {
-		h.logger.Error("Failed to stat object", "error", err)
-		http.Error(w, "Failed to retrieve track", http.StatusInternalServerError)
+	w.Header().Set("Content-Type", info.ContentType)
+
+	// Range requests need a seekable body. MinIO objects are; a store whose
+	// reader is not gets a plain sequential response rather than a broken one.
+	if rs, ok := body.(io.ReadSeeker); ok {
+		w.Header().Set("Accept-Ranges", "bytes")
+		http.ServeContent(w, r, info.Key, info.LastModified, rs)
 		return
 	}
-
-	w.Header().Set("Content-Type", stat.ContentType)
-	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeContent(w, r, stat.Key, stat.LastModified, obj)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	if _, err := io.Copy(w, body); err != nil {
+		h.logger.Error("Failed to stream track", "error", err)
+	}
 }

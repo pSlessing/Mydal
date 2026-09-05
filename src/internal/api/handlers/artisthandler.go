@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mydal/src/internal/domain"
-	"mydal/src/internal/pkg"
+	"mydal/src/internal/httpx"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -51,15 +51,15 @@ func pathUUID(r *http.Request, name string) (string, error) {
 func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		pkg.WriteError(w, h.logger, err)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
 	artist, err := h.artistService.GetArtistByID(r.Context(), id)
 	if err != nil {
-		pkg.WriteError(w, h.logger, err)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	pkg.RespondWithJSON(w, http.StatusOK, newArtistResponse(artist))
+	httpx.RespondWithJSON(w, http.StatusOK, newArtistResponse(artist))
 }
 
 // CreateArtist creates a new artist
@@ -76,15 +76,15 @@ func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 	var req createArtistRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		pkg.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
+		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
 		return
 	}
 	artist := domain.Artist{Name: req.Name, Bio: req.Bio}
 	if err := h.artistService.CreateArtist(r.Context(), &artist); err != nil {
-		pkg.WriteError(w, h.logger, err)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	pkg.RespondWithJSON(w, http.StatusCreated, newArtistResponse(&artist))
+	httpx.RespondWithJSON(w, http.StatusCreated, newArtistResponse(&artist))
 }
 
 // DeleteArtist deletes an artist
@@ -98,12 +98,12 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 func (h *ArtistHandler) DeleteArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		pkg.WriteError(w, h.logger, err)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
 	if err := h.artistService.DeleteArtist(r.Context(), id); err != nil {
-		pkg.WriteError(w, h.logger, err)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	pkg.RespondNoContent(w)
+	httpx.RespondNoContent(w)
 }

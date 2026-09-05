@@ -15,9 +15,11 @@ import (
 	"log/slog"
 	"mydal/src/internal/api"
 	"mydal/src/internal/api/handlers"
-	"mydal/src/internal/pkg"
+	"mydal/src/internal/config"
+	"mydal/src/internal/logging"
 	"mydal/src/internal/repository"
 	"mydal/src/internal/service"
+	"mydal/src/internal/storage"
 	"mydal/src/migrations"
 	"net/http"
 	"os"
@@ -44,7 +46,7 @@ const (
 
 func main() {
 	// Bootstrap logger for anything that fails before the configured one exists.
-	bootstrap := pkg.New("info")
+	bootstrap := logging.New("info")
 	if err := run(bootstrap); err != nil {
 		bootstrap.Error("Startup failed", "error", err)
 		os.Exit(1)
@@ -61,11 +63,11 @@ func run(bootstrap *slog.Logger) error {
 		return fmt.Errorf("load .env: %w", err)
 	}
 
-	cfg, err := pkg.Load()
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	logger := pkg.New(cfg.LogLevel)
+	logger := logging.New(cfg.LogLevel)
 	logger.Info("Starting server...")
 	logger.Debug("Configuration loaded", "config", cfg)
 
@@ -98,25 +100,26 @@ func run(bootstrap *slog.Logger) error {
 		return err
 	}
 
+	//init storage
+	blobs := storage.NewMinIOStore(minioClient, cfg.BucketName, logger)
+
 	//init repo
 	artistRepo := repository.NewArtistRepository(db, logger)
 	trackRepo := repository.NewTrackRepository(db, logger)
-	minioRepo := repository.NewMiniorepo(minioClient, logger, cfg.BucketName)
 	albumRepo := repository.NewAlbumRepository(db, logger)
 	playlistRepo := repository.NewPlaylistRepository(db, logger)
 
 	//init service
 	artistService := service.NewArtistService(artistRepo, logger)
-	minioService := service.NewMinioservice(minioRepo, logger)
 	trackService := service.NewTrackService(trackRepo, logger)
 	albumService := service.NewAlbumService(albumRepo, logger)
 	playlistService := service.NewPlaylistService(playlistRepo, logger)
 
 	//init handlers
 	artistHandler := handlers.NewArtistHandler(artistService, logger)
-	trackHandler := handlers.NewTrackHandler(trackService, minioService, logger)
+	trackHandler := handlers.NewTrackHandler(trackService, blobs, logger)
 	albumHandler := handlers.NewAlbumHandler(albumService, logger)
-	streamHandler := handlers.NewStreamHandler(trackService, minioService, logger)
+	streamHandler := handlers.NewStreamHandler(trackService, blobs, logger)
 	playlistHandler := handlers.NewPlaylistHandler(playlistService, logger)
 
 	//init router
@@ -125,7 +128,7 @@ func run(bootstrap *slog.Logger) error {
 	return serve(ctx, cfg.Addr, router, logger)
 }
 
-func openDB(ctx context.Context, cfg pkg.Config) (*sql.DB, error) {
+func openDB(ctx context.Context, cfg config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect to database: %w", err)
