@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"mydal/src/internal/domain"
+	"mydal/src/internal/pkg"
 	"net/http"
 )
 
@@ -38,8 +40,7 @@ func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/artists/"):]
 	artist, err := h.artistService.GetArtistByID(r.Context(), id)
 	if err != nil {
-		h.logger.Error("Failed to get artist", "error", err)
-		http.Error(w, "Artist not found", http.StatusNotFound)
+		pkg.WriteError(w, h.logger, err)
 		return
 	}
 	json.NewEncoder(w).Encode(artist)
@@ -59,13 +60,11 @@ func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 	var artist domain.Artist
 	if err := json.NewDecoder(r.Body).Decode(&artist); err != nil {
-		h.logger.Error("Failed to decode artist", "error", err)
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		pkg.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
 		return
 	}
 	if err := h.artistService.CreateArtist(r.Context(), &artist); err != nil {
-		h.logger.Error("Failed to create artist", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		pkg.WriteError(w, h.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -83,8 +82,7 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 func (h *ArtistHandler) DeleteArtist(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/artists/"):]
 	if err := h.artistService.DeleteArtist(r.Context(), id); err != nil {
-		h.logger.Error("Failed to delete artist", "error", err)
-		http.Error(w, "Failed to delete artist", http.StatusInternalServerError)
+		pkg.WriteError(w, h.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

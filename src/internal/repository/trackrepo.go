@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"mydal/src/internal/domain"
 	"time"
@@ -51,6 +53,9 @@ func scanTrack(s rowScanner) (*domain.Track, error) {
 func (r *TrackRepository) GetTrackByID(ctx context.Context, id string) (*domain.Track, error) {
 	track, err := scanTrack(r.db.QueryRowContext(ctx,
 		"SELECT "+trackColumns+" FROM tracks WHERE id = $1", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("track %s: %w", id, domain.ErrNotFound)
+	}
 	if err != nil {
 		r.logger.Error("Failed to get track by ID", "error", err)
 		return nil, err
@@ -72,11 +77,20 @@ func (r *TrackRepository) CreateTrack(ctx context.Context, track *domain.Track) 
 }
 
 func (r *TrackRepository) DeleteTrack(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = $1", id)
+	result, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = $1", id)
 	if err != nil {
 		r.logger.Error("Failed to delete track", "error", err)
+		return err
 	}
-	return err
+	rows, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to read rows affected", "error", err)
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("track %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
 }
 
 func (r *TrackRepository) UpdateStorageKey(id, storageKey string) error {

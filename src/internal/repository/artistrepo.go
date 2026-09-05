@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"mydal/src/internal/domain"
 )
@@ -22,6 +24,9 @@ func (r *ArtistRepository) GetArtistByID(ctx context.Context, id string) (*domai
 		"SELECT id, name, bio, created_at FROM artists WHERE id = $1",
 		id,
 	).Scan(&artist.ID, &artist.Name, &artist.Bio, &artist.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("artist %s: %w", id, domain.ErrNotFound)
+	}
 	if err != nil {
 		r.logger.Error("Failed to get artist by ID", "error", err)
 		return nil, err
@@ -37,9 +42,18 @@ func (r *ArtistRepository) CreateArtist(ctx context.Context, artist *domain.Arti
 }
 
 func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM artists WHERE id = $1", id)
+	result, err := r.db.ExecContext(ctx, "DELETE FROM artists WHERE id = $1", id)
 	if err != nil {
 		r.logger.Error("Failed to delete artist", "error", err)
+		return err
 	}
-	return err
+	rows, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to read rows affected", "error", err)
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("artist %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
 }
