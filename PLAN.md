@@ -1,10 +1,15 @@
 # Mydal development plan
 
-Mydal is a Go backend for a self-hosted music library: Postgres holds the catalogue, MinIO (S3-compatible) holds the audio files, and an HTTP API exposes both. This document is the roadmap from the current skeleton to a usable platform. It has three parts:
+Mydal is a Go backend for a self-hosted music library: Postgres holds the catalogue, MinIO (S3-compatible) holds the audio files, and an HTTP API exposes both. This document is the roadmap from the current skeleton to a usable platform. It has two parts:
 
-1. **Refactor now** — things worth fixing before more code is built on top of them.
-2. **Path to completion** — ordered milestones that end in a working streaming backend.
-3. **Additional features** — what to build once the core works.
+1. **Path to completion** — ordered milestones that end in a working streaming backend.
+2. **Additional features** — what to build once the core works.
+
+The "refactor now" groundwork that used to head this document is done: schema
+and domain reconciled, migrations embedded and applied at startup, config
+validated, `context` threaded, consumer-side interfaces, typed errors mapped to
+status codes, a versioned HTTP layer with real middleware, the storage layer
+behind a `BlobStore`, and the developer tooling below.
 
 Each item names the files it touches so it can be picked up independently.
 
@@ -14,54 +19,19 @@ Each item names the files it touches so it can be picked up independently.
 
 What exists:
 
-- Layered layout: `handlers -> service -> repository -> domain`, wired by hand in `src/cmd/server/main.go`, which validates config, tunes the DB pool, creates the MinIO bucket if missing, and shuts down gracefully on `SIGINT`/`SIGTERM`.
-- Artists: create / get / delete work end to end under `/api/v1`, with request/response DTOs, UUID validation, and typed errors mapped to 400/404/409/500 by `pkg.WriteError`. Every request gets an id, a log line and a panic guard. Every repository and service method takes a `ctx`, threaded from the request.
-- Tracks: repository exists, service and handler are empty stubs, routes are registered. `Miniorepo` / `Minioservice` and `TrackService` still have no methods, so nothing consumes them through an interface yet.
+- Layered layout: `handlers -> service -> repository -> domain`, wired by hand in `cmd/server/main.go`, which validates config, tunes the DB pool, creates the MinIO bucket if missing, and shuts down gracefully on `SIGINT`/`SIGTERM`.
+- Artists: create / get / delete work end to end under `/api/v1`, with request/response DTOs, UUID validation, and typed errors mapped to 400/404/409/500 by `httpx.WriteError`. Every request gets an id, a log line and a panic guard. Every repository and service method takes a `ctx`, threaded from the request.
+- Tracks: repository exists, service and handler are empty stubs, routes are registered. `TrackService` has no methods yet, so its consumer holds it concretely.
 - Storage: `internal/storage` exposes a `BlobStore` interface (`Put`, `Get`, `Stat`, `Delete`, `PresignedGetURL`) with a `MinIOStore` implementation, injected into the track handler.
-- Five tables across four SQL migrations (artists, albums, tracks, playlists + `playlist_tracks`), reconciled with the domain structs and reversible. They are embedded in the binary and applied at startup by `src/migrations/migrations.go` (`-migrate-only` applies and exits).
-- `compose.yaml` starts Postgres 16 and MinIO. `example.env` documents configuration.
-- No tests, no Dockerfile for the app, no Makefile, no CI.
+- Five tables across four SQL migrations (artists, albums, tracks, playlists + `playlist_tracks`), reconciled with the domain structs and reversible. They are embedded in the binary and applied at startup by `migrations/migrations.go` (`-migrate-only` applies and exits).
+- Routing is the stdlib `http.ServeMux`; Postgres is reached through `pgx/v5/stdlib`; `cmd/`, `internal/` and `migrations/` sit at the module root.
+- Tooling: `Makefile`, multi-stage distroless `Dockerfile`, a three-service `compose.yaml` (app, Postgres 16, MinIO) with healthchecks, named volumes and overridable host ports, `golangci-lint` config and a GitHub Actions workflow. Still no tests — Milestone A owns those.
 
 The build and `go vet` are clean.
 
 ---
 
-## Part 1 — Refactor now
-
-These are cheap today and expensive later. Do them in roughly this order, since later items build on earlier ones.
-
-### 1.8 Layout decisions still open
-
-The renames are done: storage lives in `internal/storage` behind a `BlobStore`
-interface with a `MinIOStore` implementation, and `pkg` is split into
-`internal/config`, `internal/logging` and `internal/httpx`. Three judgement
-calls are left, each of which touches the whole tree, so they want a decision
-before anyone spends the churn:
-
-- **Drop the `src/` directory?** Go convention is `cmd/` and `internal/` at the
-  module root; the `src/` prefix leaks into every import path
-  (`mydal/src/internal/...`). A one-time `git mv` plus a search-and-replace, so
-  it is do-it-now or never.
-- **`pgx` over `lib/pq`?** `lib/pq` is in maintenance mode.
-  `github.com/jackc/pgx/v5/stdlib` is a drop-in `database/sql` driver with an
-  active maintainer and better type support (arrays, timestamps). Low priority,
-  but easiest before more SQL is written.
-- **Stdlib routing over gorilla?** Go 1.22+ `http.ServeMux` supports
-  `"GET /artists/{id}"` patterns and `r.PathValue("id")`. One less dependency,
-  and it handles method mismatch without the subrouter caveat recorded in
-  `router.go`.
-
-### 1.9 Developer tooling
-
-- `Makefile` (or `Taskfile`) with `run`, `test`, `lint`, `migrate`, `up`/`down` for compose.
-- `Dockerfile` (multi-stage, distroless) and an `app` service in `compose.yaml` so the whole stack runs with one command.
-- `compose.yaml` improvements: named volumes for Postgres and MinIO (data is currently lost on `compose down`), `healthcheck`s, `depends_on: condition: service_healthy`, MinIO console port `9001`.
-- `golangci-lint` config and a GitHub Actions workflow that runs `go vet`, lint, and tests against service containers.
-- Expand `README.md`: prerequisites, first run, API overview.
-
----
-
-## Part 2 — Path to completion
+## Part 1 — Path to completion
 
 "Complete" here means: a user can upload audio files, the library is browsable by artist / album / track, playlists work, and any track can be streamed to a normal audio player. Each milestone is independently shippable.
 
@@ -127,13 +97,13 @@ At the end of Milestone F, Mydal is a functional, self-hostable music streaming 
 
 ---
 
-## Part 3 — Additional features
+## Part 2 — Additional features
 
 Roughly ordered by value-to-effort for a *local* music platform. Items within a group are independent.
 
 ### Library management
 
-- **Filesystem scanner.** Point Mydal at a directory (`MUSIC_DIR`) and have it walk, hash, tag-extract and import every file, reusing the Milestone C pipeline with a "local filesystem" `BlobStore` that references files in place instead of copying them into MinIO. For many self-hosters this is the *primary* ingestion path, so it may deserve promotion into Part 2. Watch the directory with `fsnotify` for incremental updates.
+- **Filesystem scanner.** Point Mydal at a directory (`MUSIC_DIR`) and have it walk, hash, tag-extract and import every file, reusing the Milestone C pipeline with a "local filesystem" `BlobStore` that references files in place instead of copying them into MinIO. For many self-hosters this is the *primary* ingestion path, so it may deserve promotion into Part 1. Watch the directory with `fsnotify` for incremental updates.
 - **Metadata editing that writes back to files.** Optional: when a track's tags are edited via the API, rewrite the ID3/Vorbis tags in the stored file.
 - **Bulk operations:** re-scan, re-tag, re-hash, orphan cleanup, as admin endpoints or a CLI subcommand (`mydal scan`, `mydal gc`).
 - **External metadata lookup** via MusicBrainz (release/recording IDs, canonical artist names) and Cover Art Archive for missing artwork. Rate-limited, opt-in.
@@ -177,11 +147,10 @@ Roughly ordered by value-to-effort for a *local* music platform. Items within a 
 
 | Order | Work                                    | Why first |
 |-------|-----------------------------------------|-----------|
-| 1     | Part 1 §1.8–1.9                          | Cheap while the codebase is ~20 files |
-| 2     | Milestone A (tests, health)              | Prevents regression during B–D |
-| 3     | Milestone B (CRUD)                       | Straightforward, unblocks C |
-| 4     | Milestone C (upload) + scanner from Part 3 if local files are the main source | First real value |
-| 5     | Milestone D (streaming)                  | The product works |
-| 6     | Milestones E, F                          | Usable and shippable |
-| 7     | Auth, then OpenSubsonic                  | Safe to expose; instant client ecosystem |
-| 8     | Everything else in Part 3 by preference  |           |
+| 1     | Milestone A (tests, health)              | Prevents regression during B–D |
+| 2     | Milestone B (CRUD)                       | Straightforward, unblocks C |
+| 3     | Milestone C (upload) + scanner from Part 2 if local files are the main source | First real value |
+| 4     | Milestone D (streaming)                  | The product works |
+| 5     | Milestones E, F                          | Usable and shippable |
+| 6     | Auth, then OpenSubsonic                  | Safe to expose; instant client ecosystem |
+| 7     | Everything else in Part 2 by preference  |           |

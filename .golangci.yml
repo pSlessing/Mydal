@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      # Writing an error response can itself fail; there is nothing useful to
+      # do about it, and every handler would need the same noise.
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+  exclusions:
+    presets:
+      - std-error-handling

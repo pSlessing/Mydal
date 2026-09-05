@@ -1,3 +1,7 @@
+name: mydal
+
+# Host ports are overridable so the stack can run next to an existing Postgres
+# or MinIO. Defaults are the conventional ones.
 services:
   db:
     image: postgres:16
@@ -5,13 +9,56 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_DB: musicdb
       POSTGRES_PASSWORD: secret
-      SSL_MODE: disable
-    ports: ["5432:5432"]
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d musicdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
   bucket:
     container_name: mydal
     image: minio/minio
-    command: server /data
+    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    ports: ["9000:9000"]
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - bucket-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      bucket:
+        condition: service_healthy
+    environment:
+      MODE: development
+      ADDR: ":8080"
+      DATABASE_URL: postgresql://postgres:secret@db:5432/musicdb?sslmode=disable
+      MINIO_ENDPOINT: bucket:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_USE_SSL: "false"
+      BUCKET_NAME: mydal
+      LOG_LEVEL: info
+    ports: ["${APP_PORT:-8080}:8080"]
+    restart: unless-stopped
+
+# Named, so data survives `docker compose down`.
+volumes:
+  db-data:
+  bucket-data:
