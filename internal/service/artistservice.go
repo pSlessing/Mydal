@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
-	"mydal/src/internal/domain"
+	"mydal/internal/domain"
 )
 
 // ArtistRepository is the persistence the artist service needs. It is declared

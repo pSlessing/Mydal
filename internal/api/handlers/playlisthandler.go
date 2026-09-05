@@ -3,8 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"log/slog"
-	"mydal/src/internal/domain"
-	"mydal/src/internal/service"
+	"mydal/internal/domain"
+	"mydal/internal/service"
 	"net/http"
 )
 

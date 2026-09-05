@@ -2,8 +2,8 @@ package service
 
 import (
 	"log/slog"
-	"mydal/src/internal/domain"
-	"mydal/src/internal/repository"
+	"mydal/internal/domain"
+	"mydal/internal/repository"
 )
 
 type AlbumService struct {

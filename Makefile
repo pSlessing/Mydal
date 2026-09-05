@@ -1,6 +1,6 @@
 BINARY=server
-MAIN=./src/cmd/server/
-SWAG_DIR=src
+MAIN=./cmd/server/
+SWAG_DIR=.
 SWAG_CMD=swag init --generalInfo cmd/server/main.go --output cmd/server/docs --parseDependency --parseInternal
 
 .PHONY: all swagger build run clean

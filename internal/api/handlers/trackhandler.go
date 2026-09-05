@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"mydal/src/internal/domain"
-	"mydal/src/internal/service"
-	"mydal/src/internal/storage"
+	"mydal/internal/domain"
+	"mydal/internal/service"
+	"mydal/internal/storage"
 	"net/http"
 )
 

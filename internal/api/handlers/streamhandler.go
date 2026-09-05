@@ -3,8 +3,8 @@ package handlers
 import (
 	"io"
 	"log/slog"
-	"mydal/src/internal/service"
-	"mydal/src/internal/storage"
+	"mydal/internal/service"
+	"mydal/internal/storage"
 	"net/http"
 	"strconv"
 )

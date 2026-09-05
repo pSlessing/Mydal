@@ -3,7 +3,7 @@ package repository
 import (
 	"database/sql"
 	"log/slog"
-	"mydal/src/internal/domain"
+	"mydal/internal/domain"
 )
 
 type AlbumRepository struct {

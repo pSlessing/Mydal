@@ -24,20 +24,19 @@ jobs:
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
       - name: Generate swagger docs
-        working-directory: src
         run: swag init --generalInfo cmd/server/main.go --output cmd/server/docs --parseDependency --parseInternal
 
       - name: Upload swagger artifact
         uses: actions/upload-artifact@v4
         with:
           name: swagger-docs
-          path: src/cmd/server/docs/
+          path: cmd/server/docs/
 
       - name: Prepare GitHub Pages artifact
         run: |
           mkdir -p _site
-          cp src/cmd/server/docs/swagger.json _site/
-          cp src/cmd/server/docs/swagger.yaml _site/
+          cp cmd/server/docs/swagger.json _site/
+          cp cmd/server/docs/swagger.yaml _site/
           cat > _site/index.html << 'EOF'
           <!doctype html>
           <html lang="en">

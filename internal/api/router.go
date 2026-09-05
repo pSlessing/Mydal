@@ -2,10 +2,10 @@ package api
 
 import (
 	"log/slog"
-	"mydal/src/internal/api/handlers"
+	"mydal/internal/api/handlers"
 	"net/http"
 
-	_ "mydal/src/cmd/server/docs"
+	_ "mydal/cmd/server/docs"
 
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 )

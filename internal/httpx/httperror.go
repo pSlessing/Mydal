@@ -3,7 +3,7 @@ package httpx
 import (
 	"errors"
 	"log/slog"
-	"mydal/src/internal/domain"
+	"mydal/internal/domain"
 	"net/http"
 )
 

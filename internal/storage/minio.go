@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mydal/src/internal/domain"
+	"mydal/internal/domain"
 	"net/url"
 	"time"
 

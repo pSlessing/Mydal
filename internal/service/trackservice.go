@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
-	"mydal/src/internal/domain"
+	"mydal/internal/domain"
 )
 
 // TrackRepository is the persistence the track service needs.

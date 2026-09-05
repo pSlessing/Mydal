@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"mydal/src/internal/domain"
-	"mydal/src/internal/httpx"
+	"mydal/internal/domain"
+	"mydal/internal/httpx"
 	"net/http"
 
 	"github.com/google/uuid"

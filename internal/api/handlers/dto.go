@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"mydal/src/internal/domain"
+	"mydal/internal/domain"
 	"time"
 )
 

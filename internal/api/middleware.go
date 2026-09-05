@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
-	"mydal/src/internal/httpx"
+	"mydal/internal/httpx"
 	"net/http"
 	"runtime/debug"
 	"time"
