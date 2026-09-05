@@ -17,7 +17,10 @@ func NewArtistRepository(db *sql.DB, logger *slog.Logger) *ArtistRepository {
 
 func (r *ArtistRepository) GetArtistByID(id string) (*domain.Artist, error) {
 	var artist domain.Artist
-	err := r.db.QueryRow("SELECT id, name FROM artists WHERE id = $1", id).Scan(&artist.ID, &artist.Name)
+	err := r.db.QueryRow(
+		"SELECT id, name, bio, created_at FROM artists WHERE id = $1",
+		id,
+	).Scan(&artist.ID, &artist.Name, &artist.Bio, &artist.CreatedAt)
 	if err != nil {
 		r.logger.Error("Failed to get artist by ID", "error", err)
 		return nil, err
@@ -27,9 +30,9 @@ func (r *ArtistRepository) GetArtistByID(id string) (*domain.Artist, error) {
 
 func (r *ArtistRepository) CreateArtist(artist *domain.Artist) error {
 	return r.db.QueryRow(
-		"INSERT INTO artists (name) VALUES ($1) RETURNING id",
-		artist.Name,
-	).Scan(&artist.ID)
+		"INSERT INTO artists (name, bio) VALUES ($1, $2) RETURNING id, created_at",
+		artist.Name, artist.Bio,
+	).Scan(&artist.ID, &artist.CreatedAt)
 }
 
 func (r *ArtistRepository) DeleteArtist(id string) error {
