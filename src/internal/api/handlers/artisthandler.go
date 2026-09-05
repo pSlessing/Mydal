@@ -8,6 +8,8 @@ import (
 	"mydal/src/internal/domain"
 	"mydal/src/internal/pkg"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 // ArtistService is the behaviour the artist handler needs, declared here so
@@ -27,6 +29,16 @@ func NewArtistHandler(artistService ArtistService, logger *slog.Logger) *ArtistH
 	return &ArtistHandler{artistService: artistService, logger: logger}
 }
 
+// pathUUID reads a path variable and rejects anything that is not a UUID, so a
+// malformed id is a 400 here rather than a database error mapped to a 500.
+func pathUUID(r *http.Request, name string) (string, error) {
+	id := r.PathValue(name)
+	if _, err := uuid.Parse(id); err != nil {
+		return "", fmt.Errorf("%w: %q is not a valid uuid", domain.ErrInvalidInput, id)
+	}
+	return id, nil
+}
+
 // GetArtist retrieves an artist by ID
 // @Summary      Get artist by ID
 // @Description  Retrieve a single artist by their unique identifier
@@ -37,13 +49,17 @@ func NewArtistHandler(artistService ArtistService, logger *slog.Logger) *ArtistH
 // @Failure      404  {object}  map[string]string
 // @Router       /artists/{id} [get]
 func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/artists/"):]
+	id, err := pathUUID(r, "id")
+	if err != nil {
+		pkg.WriteError(w, h.logger, err)
+		return
+	}
 	artist, err := h.artistService.GetArtistByID(r.Context(), id)
 	if err != nil {
 		pkg.WriteError(w, h.logger, err)
 		return
 	}
-	json.NewEncoder(w).Encode(artist)
+	pkg.RespondWithJSON(w, http.StatusOK, newArtistResponse(artist))
 }
 
 // CreateArtist creates a new artist
@@ -58,17 +74,17 @@ func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 // @Failure      500     {object}  map[string]string
 // @Router       /artists [post]
 func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
-	var artist domain.Artist
-	if err := json.NewDecoder(r.Body).Decode(&artist); err != nil {
+	var req createArtistRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		pkg.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
 		return
 	}
+	artist := domain.Artist{Name: req.Name, Bio: req.Bio}
 	if err := h.artistService.CreateArtist(r.Context(), &artist); err != nil {
 		pkg.WriteError(w, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(artist)
+	pkg.RespondWithJSON(w, http.StatusCreated, newArtistResponse(&artist))
 }
 
 // DeleteArtist deletes an artist
@@ -80,10 +96,14 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  map[string]string
 // @Router       /artists/{id} [delete]
 func (h *ArtistHandler) DeleteArtist(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/artists/"):]
+	id, err := pathUUID(r, "id")
+	if err != nil {
+		pkg.WriteError(w, h.logger, err)
+		return
+	}
 	if err := h.artistService.DeleteArtist(r.Context(), id); err != nil {
 		pkg.WriteError(w, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	pkg.RespondNoContent(w)
 }

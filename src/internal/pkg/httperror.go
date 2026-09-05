@@ -31,8 +31,8 @@ func WriteError(w http.ResponseWriter, logger *slog.Logger, err error) {
 	status := StatusForError(err)
 	if status == http.StatusInternalServerError {
 		logger.Error("Unhandled error", "error", err)
-		respondWithError(w, status, "internal server error")
+		RespondWithError(w, status, "internal server error")
 		return
 	}
-	respondWithError(w, status, err.Error())
+	RespondWithError(w, status, err.Error())
 }
