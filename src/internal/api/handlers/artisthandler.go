@@ -1,19 +1,27 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"mydal/src/internal/domain"
-	"mydal/src/internal/service"
 	"net/http"
 )
 
+// ArtistService is the behaviour the artist handler needs, declared here so
+// the handler can be tested against a fake.
+type ArtistService interface {
+	GetArtistByID(ctx context.Context, id string) (*domain.Artist, error)
+	CreateArtist(ctx context.Context, artist *domain.Artist) error
+	DeleteArtist(ctx context.Context, id string) error
+}
+
 type ArtistHandler struct {
-	artistService *service.ArtistService
+	artistService ArtistService
 	logger        *slog.Logger
 }
 
-func NewArtistHandler(artistService *service.ArtistService, logger *slog.Logger) *ArtistHandler {
+func NewArtistHandler(artistService ArtistService, logger *slog.Logger) *ArtistHandler {
 	return &ArtistHandler{artistService: artistService, logger: logger}
 }
 

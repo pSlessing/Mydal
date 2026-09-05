@@ -4,15 +4,22 @@ import (
 	"context"
 	"log/slog"
 	"mydal/src/internal/domain"
-	"mydal/src/internal/repository"
 )
 
+// ArtistRepository is the persistence the artist service needs. It is declared
+// here, at the consumer, so the service can be tested without Postgres.
+type ArtistRepository interface {
+	GetArtistByID(ctx context.Context, id string) (*domain.Artist, error)
+	CreateArtist(ctx context.Context, artist *domain.Artist) error
+	DeleteArtist(ctx context.Context, id string) error
+}
+
 type ArtistService struct {
-	repository *repository.ArtistRepository
+	repository ArtistRepository
 	logger     *slog.Logger
 }
 
-func NewArtistService(repo *repository.ArtistRepository, logger *slog.Logger) *ArtistService {
+func NewArtistService(repo ArtistRepository, logger *slog.Logger) *ArtistService {
 	return &ArtistService{repository: repo, logger: logger}
 }
 

@@ -34,7 +34,7 @@ func NewTrackHandler(trackService *service.TrackService, minioService *service.M
 // @Router       /tracks/{id} [get]
 func (h *TrackHandler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	track, err := h.trackService.GetTrackByID(id)
+	track, err := h.trackService.GetTrackByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("Failed to get track", "error", err)
 		http.Error(w, "Track not found", http.StatusNotFound)
@@ -62,7 +62,7 @@ func (h *TrackHandler) CreateTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
-	if err := h.trackService.CreateTrack(&track); err != nil {
+	if err := h.trackService.CreateTrack(r.Context(), &track); err != nil {
 		h.logger.Error("Failed to create track", "error", err)
 		http.Error(w, "Failed to create track", http.StatusInternalServerError)
 		return
@@ -87,7 +87,7 @@ func (h *TrackHandler) CreateTrack(w http.ResponseWriter, r *http.Request) {
 func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	_, err := h.trackService.GetTrackByID(id)
+	_, err := h.trackService.GetTrackByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
@@ -132,7 +132,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 // @Router       /tracks/{id} [delete]
 func (h *TrackHandler) DeleteTrack(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := h.trackService.DeleteTrack(id); err != nil {
+	if err := h.trackService.DeleteTrack(r.Context(), id); err != nil {
 		h.logger.Error("Failed to delete track", "error", err)
 		http.Error(w, "Failed to delete track", http.StatusInternalServerError)
 		return

@@ -33,7 +33,7 @@ func NewStreamHandler(trackService *service.TrackService, minioService *service.
 func (h *StreamHandler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	track, err := h.trackService.GetTrackByID(id)
+	track, err := h.trackService.GetTrackByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
