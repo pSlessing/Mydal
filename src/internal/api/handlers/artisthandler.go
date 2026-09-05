@@ -28,7 +28,7 @@ func NewArtistHandler(artistService *service.ArtistService, logger *slog.Logger)
 // @Router       /artists/{id} [get]
 func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/artists/"):]
-	artist, err := h.artistService.GetArtistByID(id)
+	artist, err := h.artistService.GetArtistByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("Failed to get artist", "error", err)
 		http.Error(w, "Artist not found", http.StatusNotFound)
@@ -55,7 +55,7 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
-	if err := h.artistService.CreateArtist(&artist); err != nil {
+	if err := h.artistService.CreateArtist(r.Context(), &artist); err != nil {
 		h.logger.Error("Failed to create artist", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -74,7 +74,7 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 // @Router       /artists/{id} [delete]
 func (h *ArtistHandler) DeleteArtist(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/artists/"):]
-	if err := h.artistService.DeleteArtist(id); err != nil {
+	if err := h.artistService.DeleteArtist(r.Context(), id); err != nil {
 		h.logger.Error("Failed to delete artist", "error", err)
 		http.Error(w, "Failed to delete artist", http.StatusInternalServerError)
 		return

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"mydal/src/internal/domain"
@@ -47,8 +48,8 @@ func scanTrack(s rowScanner) (*domain.Track, error) {
 	return &track, nil
 }
 
-func (r *TrackRepository) GetTrackByID(id string) (*domain.Track, error) {
-	track, err := scanTrack(r.db.QueryRow(
+func (r *TrackRepository) GetTrackByID(ctx context.Context, id string) (*domain.Track, error) {
+	track, err := scanTrack(r.db.QueryRowContext(ctx,
 		"SELECT "+trackColumns+" FROM tracks WHERE id = $1", id))
 	if err != nil {
 		r.logger.Error("Failed to get track by ID", "error", err)
@@ -57,9 +58,9 @@ func (r *TrackRepository) GetTrackByID(id string) (*domain.Track, error) {
 	return track, nil
 }
 
-func (r *TrackRepository) CreateTrack(track *domain.Track) error {
+func (r *TrackRepository) CreateTrack(ctx context.Context, track *domain.Track) error {
 	albumID := sql.NullString{String: track.AlbumID, Valid: track.AlbumID != ""}
-	return r.db.QueryRow(
+	return r.db.QueryRowContext(ctx,
 		`INSERT INTO tracks (title, artist_id, album_id, duration_ms, bitrate,
 			format, file_size, track_number, disc_number, storage_key)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -70,8 +71,8 @@ func (r *TrackRepository) CreateTrack(track *domain.Track) error {
 	).Scan(&track.ID, &track.CreatedAt)
 }
 
-func (r *TrackRepository) DeleteTrack(id string) error {
-	_, err := r.db.Exec("DELETE FROM tracks WHERE id = $1", id)
+func (r *TrackRepository) DeleteTrack(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM tracks WHERE id = $1", id)
 	if err != nil {
 		r.logger.Error("Failed to delete track", "error", err)
 	}

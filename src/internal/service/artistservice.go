@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"log/slog"
 	"mydal/src/internal/domain"
 	"mydal/src/internal/repository"
@@ -15,14 +16,14 @@ func NewArtistService(repo *repository.ArtistRepository, logger *slog.Logger) *A
 	return &ArtistService{repository: repo, logger: logger}
 }
 
-func (s *ArtistService) GetArtistByID(id string) (*domain.Artist, error) {
-	return s.repository.GetArtistByID(id)
+func (s *ArtistService) GetArtistByID(ctx context.Context, id string) (*domain.Artist, error) {
+	return s.repository.GetArtistByID(ctx, id)
 }
 
-func (s *ArtistService) CreateArtist(artist *domain.Artist) error {
-	return s.repository.CreateArtist(artist)
+func (s *ArtistService) CreateArtist(ctx context.Context, artist *domain.Artist) error {
+	return s.repository.CreateArtist(ctx, artist)
 }
 
-func (s *ArtistService) DeleteArtist(id string) error {
-	return s.repository.DeleteArtist(id)
+func (s *ArtistService) DeleteArtist(ctx context.Context, id string) error {
+	return s.repository.DeleteArtist(ctx, id)
 }
