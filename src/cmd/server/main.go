@@ -7,12 +7,15 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"flag"
 	"mydal/src/internal/api"
 	"mydal/src/internal/api/handlers"
 	"mydal/src/internal/pkg"
 	"mydal/src/internal/repository"
 	"mydal/src/internal/service"
+	"mydal/src/migrations"
 	"net/http"
 	"net/url"
 
@@ -23,6 +26,9 @@ import (
 )
 
 func main() {
+	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
+	flag.Parse()
+
 	var logger = pkg.New("debug")
 	logger.Info("Starting server...")
 
@@ -60,6 +66,15 @@ func main() {
 	}
 
 	defer db.Close()
+
+	// Bring the schema up before anything reads from it.
+	if err := migrations.Up(context.Background(), db, logger); err != nil {
+		logger.Error("Failed to apply migrations", "error", err)
+		return
+	}
+	if *migrateOnly {
+		return
+	}
 
 	// Start the server on cfg.Addr
 
