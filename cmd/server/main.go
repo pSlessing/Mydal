@@ -27,8 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -129,7 +129,7 @@ func run(bootstrap *slog.Logger) error {
 }
 
 func openDB(ctx context.Context, cfg config.Config) (*sql.DB, error) {
-	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}

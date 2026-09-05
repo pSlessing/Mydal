@@ -24,6 +24,11 @@ var FS embed.FS
 // newMigrator builds a migrator over the embedded files and an already-open
 // database, so callers reuse the pool and DSN main.go has already validated.
 //
+// This is migrate's generic "postgres" driver, which talks plain database/sql
+// and so works over the pgx stdlib driver the server opens. migrate's own
+// pgx/v5 driver is not used: it offers only WithInstance, whose Close
+// unconditionally closes the caller's *sql.DB.
+//
 // It borrows a single *sql.Conn rather than using postgres.WithInstance:
 // WithInstance keeps a reference to the *sql.DB and closing the migrator would
 // then close the caller's pool out from under the running server.
