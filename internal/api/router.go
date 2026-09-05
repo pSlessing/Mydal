@@ -47,6 +47,9 @@ func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.Tra
 }
 
 func (r *Router) registerRoutes() {
+	// Go 1.22+ ServeMux patterns carry the method, so a known path with an
+	// unknown method is answered 405 with an Allow header, and GET also
+	// answers HEAD.
 	r.mux.HandleFunc("POST "+APIPrefix+"/artists", r.artistHandler.CreateArtist)
 	r.mux.HandleFunc("GET "+APIPrefix+"/artists/{id}", r.artistHandler.GetArtist)
 	r.mux.HandleFunc("DELETE "+APIPrefix+"/artists/{id}", r.artistHandler.DeleteArtist)

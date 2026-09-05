@@ -29,7 +29,7 @@ func NewArtistHandler(artistService ArtistService, logger *slog.Logger) *ArtistH
 	return &ArtistHandler{artistService: artistService, logger: logger}
 }
 
-// pathUUID reads a path variable and rejects anything that is not a UUID, so a
+// pathUUID reads a path wildcard and rejects anything that is not a UUID, so a
 // malformed id is a 400 here rather than a database error mapped to a 500.
 func pathUUID(r *http.Request, name string) (string, error) {
 	id := r.PathValue(name)
