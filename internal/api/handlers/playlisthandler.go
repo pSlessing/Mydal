@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"mydal/internal/domain"
+	"mydal/internal/httpx"
 	"mydal/internal/service"
 	"net/http"
 )
@@ -34,8 +35,7 @@ func (h *PlaylistHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Playlist not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(playlist)
+	httpx.RespondWithJSON(w, http.StatusOK, playlist)
 }
 
 // CreatePlaylist creates a new playlist
@@ -61,9 +61,7 @@ func (h *PlaylistHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(playlist)
+	httpx.RespondWithJSON(w, http.StatusCreated, playlist)
 }
 
 // DeletePlaylist deletes a playlist

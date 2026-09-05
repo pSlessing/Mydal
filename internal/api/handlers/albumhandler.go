@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"mydal/internal/domain"
+	"mydal/internal/httpx"
 	"mydal/internal/service"
 	"net/http"
 )
@@ -34,7 +35,7 @@ func (h *AlbumHandler) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Album not found", http.StatusNotFound)
 		return
 	}
-	json.NewEncoder(w).Encode(album)
+	httpx.RespondWithJSON(w, http.StatusOK, album)
 }
 
 // CreateAlbum creates a new album
@@ -60,8 +61,7 @@ func (h *AlbumHandler) CreateAlbum(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(album)
+	httpx.RespondWithJSON(w, http.StatusCreated, album)
 }
 
 // DeleteAlbum deletes an album

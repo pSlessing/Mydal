@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
+	"mydal/internal/httpx"
 	"mydal/internal/service"
 	"mydal/internal/storage"
 	"net/http"
@@ -37,8 +38,7 @@ func (h *TrackHandler) GetTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(track)
+	httpx.RespondWithJSON(w, http.StatusOK, track)
 }
 
 // CreateTrack creates a new track
@@ -64,9 +64,7 @@ func (h *TrackHandler) CreateTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create track", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(track)
+	httpx.RespondWithJSON(w, http.StatusCreated, track)
 }
 
 // UploadTrackFile uploads an audio file for a track
