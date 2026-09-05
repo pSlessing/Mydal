@@ -1,6 +1,6 @@
-basePath: /
+basePath: /api/v1
 definitions:
-  mydal_src_internal_domain.Album:
+  mydal_internal_domain.Album:
     properties:
       artistID:
         type: string
@@ -13,14 +13,18 @@ definitions:
       title:
         type: string
     type: object
-  mydal_src_internal_domain.Artist:
+  mydal_internal_domain.Artist:
     properties:
+      bio:
+        type: string
+      createdAt:
+        type: string
       id:
         type: string
       name:
         type: string
     type: object
-  mydal_src_internal_domain.Playlist:
+  mydal_internal_domain.Playlist:
     properties:
       createdAt:
         type: string
@@ -35,18 +39,24 @@ definitions:
       title:
         type: string
     type: object
-  mydal_src_internal_domain.Track:
+  mydal_internal_domain.Track:
     properties:
-      album:
-        $ref: '#/definitions/mydal_src_internal_domain.Album'
-      artist:
-        $ref: '#/definitions/mydal_src_internal_domain.Artist'
+      albumID:
+        description: AlbumID is empty for a track that belongs to no album.
+        type: string
+      artistID:
+        type: string
       bitrate:
         type: integer
       createdAt:
         type: string
+      discNumber:
+        type: integer
       duration:
         $ref: '#/definitions/time.Duration'
+      fileSize:
+        format: int64
+        type: integer
       format:
         description: '"flac", "mp3", etc.'
         type: string
@@ -57,6 +67,8 @@ definitions:
         type: string
       title:
         type: string
+      trackNumber:
+        type: integer
     type: object
   time.Duration:
     enum:
@@ -97,14 +109,14 @@ paths:
         name: album
         required: true
         schema:
-          $ref: '#/definitions/mydal_src_internal_domain.Album'
+          $ref: '#/definitions/mydal_internal_domain.Album'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Album'
+            $ref: '#/definitions/mydal_internal_domain.Album'
         "400":
           description: Bad Request
           schema:
@@ -155,7 +167,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Album'
+            $ref: '#/definitions/mydal_internal_domain.Album'
         "404":
           description: Not Found
           schema:
@@ -176,14 +188,14 @@ paths:
         name: artist
         required: true
         schema:
-          $ref: '#/definitions/mydal_src_internal_domain.Artist'
+          $ref: '#/definitions/mydal_internal_domain.Artist'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Artist'
+            $ref: '#/definitions/mydal_internal_domain.Artist'
         "400":
           description: Bad Request
           schema:
@@ -234,7 +246,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Artist'
+            $ref: '#/definitions/mydal_internal_domain.Artist'
         "404":
           description: Not Found
           schema:
@@ -255,14 +267,14 @@ paths:
         name: playlist
         required: true
         schema:
-          $ref: '#/definitions/mydal_src_internal_domain.Playlist'
+          $ref: '#/definitions/mydal_internal_domain.Playlist'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Playlist'
+            $ref: '#/definitions/mydal_internal_domain.Playlist'
         "400":
           description: Bad Request
           schema:
@@ -313,7 +325,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Playlist'
+            $ref: '#/definitions/mydal_internal_domain.Playlist'
         "404":
           description: Not Found
           schema:
@@ -385,14 +397,14 @@ paths:
         name: track
         required: true
         schema:
-          $ref: '#/definitions/mydal_src_internal_domain.Track'
+          $ref: '#/definitions/mydal_internal_domain.Track'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Track'
+            $ref: '#/definitions/mydal_internal_domain.Track'
         "400":
           description: Bad Request
           schema:
@@ -443,7 +455,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_src_internal_domain.Track'
+            $ref: '#/definitions/mydal_internal_domain.Track'
         "404":
           description: Not Found
           schema:

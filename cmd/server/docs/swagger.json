@@ -7,7 +7,7 @@
         "version": "1.0"
     },
     "host": "localhost:8080",
-    "basePath": "/",
+    "basePath": "/api/v1",
     "paths": {
         "/albums": {
             "post": {
@@ -29,7 +29,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                            "$ref": "#/definitions/mydal_internal_domain.Album"
                         }
                     }
                 ],
@@ -37,7 +37,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                            "$ref": "#/definitions/mydal_internal_domain.Album"
                         }
                     },
                     "400": {
@@ -84,7 +84,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                            "$ref": "#/definitions/mydal_internal_domain.Album"
                         }
                     },
                     "404": {
@@ -149,7 +149,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                            "$ref": "#/definitions/mydal_internal_domain.Artist"
                         }
                     }
                 ],
@@ -157,7 +157,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                            "$ref": "#/definitions/mydal_internal_domain.Artist"
                         }
                     },
                     "400": {
@@ -204,7 +204,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                            "$ref": "#/definitions/mydal_internal_domain.Artist"
                         }
                     },
                     "404": {
@@ -269,7 +269,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Playlist"
+                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
                         }
                     }
                 ],
@@ -277,7 +277,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Playlist"
+                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
                         }
                     },
                     "400": {
@@ -324,7 +324,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Playlist"
+                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
                         }
                     },
                     "404": {
@@ -465,7 +465,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                            "$ref": "#/definitions/mydal_internal_domain.Track"
                         }
                     }
                 ],
@@ -473,7 +473,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                            "$ref": "#/definitions/mydal_internal_domain.Track"
                         }
                     },
                     "400": {
@@ -520,7 +520,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                            "$ref": "#/definitions/mydal_internal_domain.Track"
                         }
                     },
                     "404": {
@@ -674,7 +674,7 @@
         }
     },
     "definitions": {
-        "mydal_src_internal_domain.Album": {
+        "mydal_internal_domain.Album": {
             "type": "object",
             "properties": {
                 "artistID": {
@@ -694,9 +694,15 @@
                 }
             }
         },
-        "mydal_src_internal_domain.Artist": {
+        "mydal_internal_domain.Artist": {
             "type": "object",
             "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -705,7 +711,7 @@
                 }
             }
         },
-        "mydal_src_internal_domain.Playlist": {
+        "mydal_internal_domain.Playlist": {
             "type": "object",
             "properties": {
                 "createdAt": {
@@ -728,14 +734,15 @@
                 }
             }
         },
-        "mydal_src_internal_domain.Track": {
+        "mydal_internal_domain.Track": {
             "type": "object",
             "properties": {
-                "album": {
-                    "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                "albumID": {
+                    "description": "AlbumID is empty for a track that belongs to no album.",
+                    "type": "string"
                 },
-                "artist": {
-                    "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                "artistID": {
+                    "type": "string"
                 },
                 "bitrate": {
                     "type": "integer"
@@ -743,8 +750,15 @@
                 "createdAt": {
                     "type": "string"
                 },
+                "discNumber": {
+                    "type": "integer"
+                },
                 "duration": {
                     "$ref": "#/definitions/time.Duration"
+                },
+                "fileSize": {
+                    "type": "integer",
+                    "format": "int64"
                 },
                 "format": {
                     "description": "\"flac\", \"mp3\", etc.",
@@ -759,6 +773,9 @@
                 },
                 "title": {
                     "type": "string"
+                },
+                "trackNumber": {
+                    "type": "integer"
                 }
             }
         },

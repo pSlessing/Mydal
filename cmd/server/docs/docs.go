@@ -35,7 +35,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                            "$ref": "#/definitions/mydal_internal_domain.Album"
                         }
                     }
                 ],
@@ -43,7 +43,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                            "$ref": "#/definitions/mydal_internal_domain.Album"
                         }
                     },
                     "400": {
@@ -90,7 +90,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                            "$ref": "#/definitions/mydal_internal_domain.Album"
                         }
                     },
                     "404": {
@@ -155,7 +155,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                            "$ref": "#/definitions/mydal_internal_domain.Artist"
                         }
                     }
                 ],
@@ -163,7 +163,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                            "$ref": "#/definitions/mydal_internal_domain.Artist"
                         }
                     },
                     "400": {
@@ -210,7 +210,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                            "$ref": "#/definitions/mydal_internal_domain.Artist"
                         }
                     },
                     "404": {
@@ -275,7 +275,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Playlist"
+                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
                         }
                     }
                 ],
@@ -283,7 +283,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Playlist"
+                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
                         }
                     },
                     "400": {
@@ -330,7 +330,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Playlist"
+                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
                         }
                     },
                     "404": {
@@ -471,7 +471,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                            "$ref": "#/definitions/mydal_internal_domain.Track"
                         }
                     }
                 ],
@@ -479,7 +479,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                            "$ref": "#/definitions/mydal_internal_domain.Track"
                         }
                     },
                     "400": {
@@ -526,7 +526,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_src_internal_domain.Track"
+                            "$ref": "#/definitions/mydal_internal_domain.Track"
                         }
                     },
                     "404": {
@@ -680,7 +680,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "mydal_src_internal_domain.Album": {
+        "mydal_internal_domain.Album": {
             "type": "object",
             "properties": {
                 "artistID": {
@@ -700,9 +700,15 @@ const docTemplate = `{
                 }
             }
         },
-        "mydal_src_internal_domain.Artist": {
+        "mydal_internal_domain.Artist": {
             "type": "object",
             "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -711,7 +717,7 @@ const docTemplate = `{
                 }
             }
         },
-        "mydal_src_internal_domain.Playlist": {
+        "mydal_internal_domain.Playlist": {
             "type": "object",
             "properties": {
                 "createdAt": {
@@ -734,14 +740,15 @@ const docTemplate = `{
                 }
             }
         },
-        "mydal_src_internal_domain.Track": {
+        "mydal_internal_domain.Track": {
             "type": "object",
             "properties": {
-                "album": {
-                    "$ref": "#/definitions/mydal_src_internal_domain.Album"
+                "albumID": {
+                    "description": "AlbumID is empty for a track that belongs to no album.",
+                    "type": "string"
                 },
-                "artist": {
-                    "$ref": "#/definitions/mydal_src_internal_domain.Artist"
+                "artistID": {
+                    "type": "string"
                 },
                 "bitrate": {
                     "type": "integer"
@@ -749,8 +756,15 @@ const docTemplate = `{
                 "createdAt": {
                     "type": "string"
                 },
+                "discNumber": {
+                    "type": "integer"
+                },
                 "duration": {
                     "$ref": "#/definitions/time.Duration"
+                },
+                "fileSize": {
+                    "type": "integer",
+                    "format": "int64"
                 },
                 "format": {
                     "description": "\"flac\", \"mp3\", etc.",
@@ -765,6 +779,9 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "trackNumber": {
+                    "type": "integer"
                 }
             }
         },
@@ -799,7 +816,7 @@ const docTemplate = `{
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
 	Host:             "localhost:8080",
-	BasePath:         "/",
+	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Mydal API",
 	Description:      "Music library management and streaming API",

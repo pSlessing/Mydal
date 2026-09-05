@@ -2,7 +2,7 @@
 // @version         1.0
 // @description     Music library management and streaming API
 // @host            localhost:8080
-// @BasePath        /
+// @BasePath        /api/v1
 
 package main
 
