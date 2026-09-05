@@ -27,7 +27,7 @@ func NewAlbumHandler(service *service.AlbumService, logger *slog.Logger) *AlbumH
 // @Failure      404  {object}  map[string]string
 // @Router       /albums/{id} [get]
 func (h *AlbumHandler) GetAlbum(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/albums/"):]
+	id := r.PathValue("id")
 	album, err := h.service.GetAlbumByID(id)
 	if err != nil {
 		h.logger.Error("Failed to get album", "error", err)
@@ -73,7 +73,7 @@ func (h *AlbumHandler) CreateAlbum(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  map[string]string
 // @Router       /albums/{id} [delete]
 func (h *AlbumHandler) DeleteAlbum(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/albums/"):]
+	id := r.PathValue("id")
 	if err := h.service.DeleteAlbum(id); err != nil {
 		h.logger.Error("Failed to delete album", "error", err)
 		http.Error(w, "Failed to delete album", http.StatusInternalServerError)
