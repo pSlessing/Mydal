@@ -9,7 +9,10 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
+	"fmt"
+	"log/slog"
 	"mydal/src/internal/api"
 	"mydal/src/internal/api/handlers"
 	"mydal/src/internal/pkg"
@@ -17,7 +20,10 @@ import (
 	"mydal/src/internal/service"
 	"mydal/src/migrations"
 	"net/http"
-	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -25,67 +31,71 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+const (
+	// Startup work must not hang forever on an unreachable dependency.
+	startupTimeout = 10 * time.Second
+	// Long enough for in-flight requests, short enough for an orchestrator.
+	shutdownTimeout = 30 * time.Second
+
+	maxOpenConns    = 25
+	maxIdleConns    = 25
+	connMaxLifetime = 5 * time.Minute
+)
+
 func main() {
+	// Bootstrap logger for anything that fails before the configured one exists.
+	bootstrap := pkg.New("info")
+	if err := run(bootstrap); err != nil {
+		bootstrap.Error("Startup failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(bootstrap *slog.Logger) error {
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	flag.Parse()
 
-	var logger = pkg.New("debug")
+	// In production the variables come from the environment and there is no
+	// .env file, so a missing one is not an error.
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("load .env: %w", err)
+	}
+
+	cfg, err := pkg.Load()
+	if err != nil {
+		return err
+	}
+	logger := pkg.New(cfg.LogLevel)
 	logger.Info("Starting server...")
-
-	// Load configuration
-	err := godotenv.Load()
-	if err != nil {
-		logger.Error("Failed to load .env file", "error", err)
-		return
-	}
-	cfg := pkg.Load()
 	logger.Debug("Configuration loaded", "config", cfg)
-	// Initialize database connection, etc. here using cfg.DatabaseURL
-	var db *sql.DB
 
-	u, err := url.Parse(cfg.DatabaseURL)
+	// Signals cancel this context, which unblocks the wait below.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := openDB(ctx, cfg)
 	if err != nil {
-		logger.Error("Failed to parse database URL", "error", err)
-		return
+		return err
 	}
-	if cfg.Mode != "production" {
-		q := u.Query()
-		q.Set("sslmode", "disable")
-		u.RawQuery = q.Encode()
-	}
-	dbURL := u.String()
-
-	db, err = sql.Open("postgres", dbURL)
-	if err != nil {
-		logger.Error("Failed to connect to database", "error", err)
-		return
-	}
-	if err := db.Ping(); err != nil {
-		logger.Error("Failed to ping database", "error", err)
-		return
-	}
-
 	defer db.Close()
 
 	// Bring the schema up before anything reads from it.
-	if err := migrations.Up(context.Background(), db, logger); err != nil {
-		logger.Error("Failed to apply migrations", "error", err)
-		return
+	if err := migrations.Up(ctx, db, logger); err != nil {
+		return fmt.Errorf("apply migrations: %w", err)
 	}
 	if *migrateOnly {
-		return
+		return nil
 	}
 
-	// Start the server on cfg.Addr
-
-	// Initialize MinIO client
 	minioClient, err := minio.New(cfg.MinioEndpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
 		Secure: cfg.MinioUseSSL,
 	})
 	if err != nil {
-		logger.Error("Failed to initialize MinIO client", "error", err)
-		return
+		return fmt.Errorf("initialise MinIO client: %w", err)
+	}
+	if err := ensureBucket(ctx, minioClient, cfg.BucketName, logger); err != nil {
+		return err
 	}
 
 	//init repo
@@ -112,8 +122,80 @@ func main() {
 	//init router
 	router := api.NewRouter(artistHandler, trackHandler, albumHandler, streamHandler, playlistHandler, logger)
 
-	logger.Info("Server is running on " + cfg.Addr)
-	if err := http.ListenAndServe(cfg.Addr, router); err != nil {
-		logger.Error("Failed to start server", "error", err)
+	return serve(ctx, cfg.Addr, router, logger)
+}
+
+func openDB(ctx context.Context, cfg pkg.Config) (*sql.DB, error) {
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("connect to database: %w", err)
 	}
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(connMaxLifetime)
+
+	pingCtx, cancel := context.WithTimeout(ctx, startupTimeout)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return db, nil
+}
+
+// ensureBucket creates the configured bucket if it is missing, so a fresh
+// `docker compose up` needs no manual MinIO setup.
+func ensureBucket(ctx context.Context, client *minio.Client, bucket string, logger *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(ctx, startupTimeout)
+	defer cancel()
+
+	exists, err := client.BucketExists(ctx, bucket)
+	if err != nil {
+		return fmt.Errorf("check bucket %q: %w", bucket, err)
+	}
+	if exists {
+		logger.Debug("Bucket already exists", "bucket", bucket)
+		return nil
+	}
+	if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+		return fmt.Errorf("create bucket %q: %w", bucket, err)
+	}
+	logger.Info("Created bucket", "bucket", bucket)
+	return nil
+}
+
+// serve runs the HTTP server until ctx is cancelled, then drains it.
+func serve(ctx context.Context, addr string, handler http.Handler, logger *slog.Logger) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// WriteTimeout is deliberately unset: streaming a large audio file is
+		// a long-lived response and must not be cut off mid-flight.
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Info("Server is running on " + addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("serve: %w", err)
+	case <-ctx.Done():
+		logger.Info("Shutdown signal received, draining connections")
+	}
+
+	// A fresh context: the signal has already cancelled ctx.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	logger.Info("Server stopped")
+	return nil
 }
