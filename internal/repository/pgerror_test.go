@@ -14,13 +14,12 @@ import (
 func TestConstraintViolationsBecomeSentinels(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	quiet := testutil.Quiet()
 	missing := "00000000-0000-0000-0000-000000000000"
 
-	albums := NewAlbumRepository(db, quiet)
-	tracks := NewTrackRepository(db, quiet)
-	playlists := NewPlaylistRepository(db, quiet)
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	albums := NewAlbumRepository(db)
+	tracks := NewTrackRepository(db)
+	playlists := NewPlaylistRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 	trackID := seedTrack(t, tracks, artistID, "a")
 
 	// Foreign key violations: 400.
@@ -58,8 +57,8 @@ func TestConstraintViolationsBecomeSentinels(t *testing.T) {
 // error.
 func TestOutageStaysUnclassified(t *testing.T) {
 	db := testutil.DB(t)
-	repo := NewAlbumRepository(db, testutil.Quiet())
-	artistID := seedArtist(t, NewArtistRepository(db, testutil.Quiet()))
+	repo := NewAlbumRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 	db.Close()
 
 	err := repo.CreateAlbum(context.Background(), &domain.Album{Title: "X", ArtistID: artistID})
@@ -77,13 +76,12 @@ func TestOutageStaysUnclassified(t *testing.T) {
 // disconnect could not cancel the query behind it.
 func TestCancellationReachesPostgres(t *testing.T) {
 	db := testutil.DB(t)
-	quiet := testutil.Quiet()
-	albums := NewAlbumRepository(db, quiet)
-	playlists := NewPlaylistRepository(db, quiet)
-	tracks := NewTrackRepository(db, quiet)
+	albums := NewAlbumRepository(db)
+	playlists := NewPlaylistRepository(db)
+	tracks := NewTrackRepository(db)
 
 	live := context.Background()
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	artistID := seedArtist(t, NewArtistRepository(db))
 	trackID := seedTrack(t, tracks, artistID, "a")
 	album := &domain.Album{Title: "A", ArtistID: artistID}
 	if err := albums.CreateAlbum(live, album); err != nil {
@@ -106,7 +104,7 @@ func TestCancellationReachesPostgres(t *testing.T) {
 		"DeletePlaylist":  func() error { return playlists.DeletePlaylist(dead, p.ID) },
 		"AddTrack":        func() error { return playlists.AddTrack(dead, p.ID, trackID) },
 		"RemoveTrack":     func() error { return playlists.RemoveTrack(dead, p.ID, trackID) },
-		"SetTrackFile":    func() error { return tracks.SetTrackFile(dead, trackID, "k", "h") },
+		"SetTrackFile":    func() error { return tracks.SetTrackFile(dead, trackID, "k", "h", "flac", 1) },
 	} {
 		if err := call(); !errors.Is(err, context.Canceled) {
 			t.Errorf("%s with a cancelled context = %v, want context.Canceled", name, err)

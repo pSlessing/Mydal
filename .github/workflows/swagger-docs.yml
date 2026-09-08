@@ -20,11 +20,16 @@ jobs:
       - name: Build project
         run: go build ./...
 
+      # Pinned to the version go.mod requires, so the CLI that generates the
+      # spec and the library the generated code imports never drift apart.
       - name: Install swag CLI
-        run: go install github.com/swaggo/swag/cmd/swag@latest
+        run: go install github.com/swaggo/swag/cmd/swag@v1.16.6
 
       - name: Generate swagger docs
         run: swag init --generalInfo cmd/server/main.go --output cmd/server/docs --parseDependency --parseInternal
+
+      - name: Check committed docs match the generated ones
+        run: git diff --exit-code -- cmd/server/docs
 
       - name: Upload swagger artifact
         uses: actions/upload-artifact@v4

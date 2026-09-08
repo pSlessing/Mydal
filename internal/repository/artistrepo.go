@@ -5,17 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"mydal/internal/domain"
 )
 
 type ArtistRepository struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db *sql.DB
 }
 
-func NewArtistRepository(db *sql.DB, logger *slog.Logger) *ArtistRepository {
-	return &ArtistRepository{db: db, logger: logger}
+func NewArtistRepository(db *sql.DB) *ArtistRepository {
+	return &ArtistRepository{db: db}
 }
 
 func (r *ArtistRepository) GetArtistByID(ctx context.Context, id string) (*domain.Artist, error) {
@@ -28,7 +26,6 @@ func (r *ArtistRepository) GetArtistByID(ctx context.Context, id string) (*domai
 		return nil, fmt.Errorf("artist %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
-		r.logger.Error("Failed to get artist by ID", "error", err)
 		return nil, err
 	}
 	return &artist, nil
@@ -46,18 +43,26 @@ func (r *ArtistRepository) CreateArtist(ctx context.Context, artist *domain.Arti
 // vanish with the artist and nothing afterwards records which objects they
 // pointed at - the keys have to be collected inside the transaction, before
 // the cascade fires.
+//
+// The SELECT locks every track row for the artist, not just the ones that
+// currently have a file, and only then reads storage_key. That closes the
+// race with a concurrent upload's SetTrackFile: if its UPDATE reaches a row
+// first, this SELECT blocks until it commits and so reads the new key; if
+// this SELECT locks the row first, the UPDATE blocks until this transaction
+// commits and then affects zero rows (the row is gone), which SetTrackFile
+// already reports as ErrNotFound and the handler already cleans up as an
+// unreferenced object. Either way, no track can finish an upload whose key
+// this method fails to collect.
 func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) ([]string, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		r.logger.Error("Failed to begin transaction", "error", err)
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
-		"SELECT storage_key FROM tracks WHERE artist_id = $1 AND storage_key <> ''", id)
+		"SELECT storage_key FROM tracks WHERE artist_id = $1 FOR UPDATE", id)
 	if err != nil {
-		r.logger.Error("Failed to collect artist storage keys", "error", err)
 		return nil, err
 	}
 	var keys []string
@@ -67,7 +72,9 @@ func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) ([]strin
 			rows.Close()
 			return nil, err
 		}
-		keys = append(keys, key)
+		if key != "" {
+			keys = append(keys, key)
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -76,12 +83,10 @@ func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) ([]strin
 
 	result, err := tx.ExecContext(ctx, "DELETE FROM artists WHERE id = $1", id)
 	if err != nil {
-		r.logger.Error("Failed to delete artist", "error", err)
 		return nil, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		r.logger.Error("Failed to read rows affected", "error", err)
 		return nil, err
 	}
 	if affected == 0 {

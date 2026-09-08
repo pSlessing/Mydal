@@ -333,29 +333,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/healthz": {
-            "get": {
-                "description": "Reports that the process is running. Dependencies are deliberately not checked - restarting the server does not fix a database outage.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "health"
-                ],
-                "summary": "Liveness probe",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/playlists": {
             "post": {
                 "description": "Add a new playlist to the database",
@@ -637,34 +614,6 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
-                        }
-                    }
-                }
-            }
-        },
-        "/readyz": {
-            "get": {
-                "description": "Checks the database and the blob store. Answers 503 with a per-dependency breakdown when either is unreachable.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "health"
-                ],
-                "summary": "Readiness probe",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
                         }
                     }
                 }
@@ -1153,10 +1102,11 @@ const docTemplate = `{
                 "format": {
                     "type": "string"
                 },
-                "id": {
-                    "type": "string"
+                "has_file": {
+                    "description": "HasFile says whether an upload has landed, without exposing\nstorage_key, which names an object in the bucket - layout, not API.",
+                    "type": "boolean"
                 },
-                "storage_key": {
+                "id": {
                     "type": "string"
                 },
                 "title": {

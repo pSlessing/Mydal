@@ -31,6 +31,9 @@ func (s *ArtistService) GetArtistByID(ctx context.Context, id string) (*domain.A
 }
 
 func (s *ArtistService) CreateArtist(ctx context.Context, artist *domain.Artist) error {
+	if err := requireNonEmpty("name", artist.Name); err != nil {
+		return err
+	}
 	return s.repository.CreateArtist(ctx, artist)
 }
 

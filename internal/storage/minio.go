@@ -13,31 +13,57 @@ import (
 	"github.com/minio/minio-go/v7"
 )
 
+// minPartSize is the floor for the part size computed below. minio-go
+// buffers a whole part in memory before sending it, so this is also
+// (roughly) the minimum per-upload memory cost once a part size is set.
+const minPartSize = 16 << 20 // 16 MiB
+
+// maxParts is S3's own multipart-upload ceiling: a PartSize too small for the
+// upload cap would need more parts than a multipart upload can have.
+const maxParts = 10000
+
 // MinIOStore is the S3-compatible BlobStore implementation.
 type MinIOStore struct {
-	client *minio.Client
-	bucket string
-	logger *slog.Logger
+	client   *minio.Client
+	bucket   string
+	partSize uint64
+	logger   *slog.Logger
 }
 
-func NewMinIOStore(client *minio.Client, bucket string, logger *slog.Logger) *MinIOStore {
-	return &MinIOStore{client: client, bucket: bucket, logger: logger}
+// NewMinIOStore builds a store whose part size, for uploads of unknown
+// length, is derived from maxUploadBytes: large enough that the largest
+// allowed upload still fits under maxParts, never smaller than minPartSize.
+// Without this, minio-go sizes parts for a 5 TiB object (~537 MiB each) and
+// buffers a whole part in memory, so a handful of concurrent chunked uploads
+// can exhaust a small host.
+func NewMinIOStore(client *minio.Client, bucket string, maxUploadBytes int64, logger *slog.Logger) *MinIOStore {
+	partSize := uint64(minPartSize)
+	if computed := uint64(maxUploadBytes) / maxParts; maxUploadBytes > 0 && computed > partSize {
+		partSize = computed
+	}
+	return &MinIOStore{client: client, bucket: bucket, partSize: partSize, logger: logger}
 }
 
 // notFound reports whether err is MinIO's "no such key", so callers see
-// domain.ErrNotFound rather than a vendor error.
+// domain.ErrNotFound rather than a vendor error. Only the specific code, not
+// every 404, matters here: NoSuchBucket is also a 404, and treating it the
+// same as a missing key would report a deleted bucket as "track not found"
+// instead of the outage it actually is.
 func notFound(err error) bool {
 	var resp minio.ErrorResponse
-	if errors.As(err, &resp) {
-		return resp.Code == "NoSuchKey" || resp.StatusCode == 404
-	}
-	return false
+	return errors.As(err, &resp) && resp.Code == "NoSuchKey"
 }
 
 func (s *MinIOStore) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
-	_, err := s.client.PutObject(ctx, s.bucket, key, r, size, minio.PutObjectOptions{
-		ContentType: contentType,
-	})
+	opts := minio.PutObjectOptions{ContentType: contentType}
+	if size < 0 {
+		// Unknown length: bound the part size (and so the buffer minio-go
+		// holds per part) instead of letting it default to one sized for a
+		// 5 TiB object. One thread keeps it to a single buffer per upload.
+		opts.PartSize = s.partSize
+		opts.NumThreads = 1
+	}
+	_, err := s.client.PutObject(ctx, s.bucket, key, r, size, opts)
 	if err != nil {
 		s.logger.Error("Failed to put object", "key", key, "error", err)
 		return fmt.Errorf("put object %q: %w", key, err)
@@ -45,21 +71,29 @@ func (s *MinIOStore) Put(ctx context.Context, key string, r io.Reader, size int6
 	return nil
 }
 
-func (s *MinIOStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+func (s *MinIOStore) Get(ctx context.Context, key string) (io.ReadSeekCloser, ObjectInfo, error) {
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("get object %q: %w", key, err)
+		return nil, ObjectInfo{}, fmt.Errorf("get object %q: %w", key, err)
 	}
-	// GetObject is lazy and reports a missing key only on first read, so make
-	// the error surface here instead of halfway through a response.
-	if _, err := obj.Stat(); err != nil {
+	// GetObject is lazy and reports a missing key only on first read, so stat
+	// it now to surface that early - which, done here rather than by a
+	// separate Stat call before Get, is what turns two round trips into one.
+	info, err := obj.Stat()
+	if err != nil {
 		obj.Close()
 		if notFound(err) {
-			return nil, fmt.Errorf("object %s: %w", key, domain.ErrNotFound)
+			return nil, ObjectInfo{}, fmt.Errorf("object %s: %w", key, domain.ErrNotFound)
 		}
-		return nil, fmt.Errorf("stat object %q: %w", key, err)
+		return nil, ObjectInfo{}, fmt.Errorf("stat object %q: %w", key, err)
 	}
-	return obj, nil
+	return obj, ObjectInfo{
+		Key:          info.Key,
+		Size:         info.Size,
+		ContentType:  info.ContentType,
+		ETag:         info.ETag,
+		LastModified: info.LastModified,
+	}, nil
 }
 
 func (s *MinIOStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
@@ -77,6 +111,21 @@ func (s *MinIOStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 		ETag:         info.ETag,
 		LastModified: info.LastModified,
 	}, nil
+}
+
+// List returns every object key in the bucket. It exists for the orphan
+// sweep, which is a maintenance path run out-of-band from request handling,
+// so loading the whole listing into memory is acceptable here in a way it
+// would not be on a request path.
+func (s *MinIOStore) List(ctx context.Context) ([]string, error) {
+	var keys []string
+	for obj := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Recursive: true}) {
+		if obj.Err != nil {
+			return nil, fmt.Errorf("list bucket %q: %w", s.bucket, obj.Err)
+		}
+		keys = append(keys, obj.Key)
+	}
+	return keys, nil
 }
 
 func (s *MinIOStore) Delete(ctx context.Context, key string) error {

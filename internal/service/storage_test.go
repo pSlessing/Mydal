@@ -34,8 +34,8 @@ func TestDeletingTheLibraryEmptiesTheBucket(t *testing.T) {
 	ctx := context.Background()
 	quiet := testutil.Quiet()
 
-	artistRepo := repository.NewArtistRepository(db, quiet)
-	trackRepo := repository.NewTrackRepository(db, quiet)
+	artistRepo := repository.NewArtistRepository(db)
+	trackRepo := repository.NewTrackRepository(db)
 	artists := NewArtistService(artistRepo, blobs, quiet)
 	tracks := NewTrackService(trackRepo, blobs, quiet)
 
@@ -109,7 +109,7 @@ func TestDeletingTheLibraryEmptiesTheBucket(t *testing.T) {
 func TestDeleteArtistReportsMissing(t *testing.T) {
 	db := testutil.DB(t)
 	blobs := testutil.Blobs(t)
-	svc := NewArtistService(repository.NewArtistRepository(db, testutil.Quiet()), blobs, testutil.Quiet())
+	svc := NewArtistService(repository.NewArtistRepository(db), blobs, testutil.Quiet())
 	err := svc.DeleteArtist(context.Background(), "00000000-0000-0000-0000-000000000000")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("delete missing artist = %v, want ErrNotFound", err)

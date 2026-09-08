@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
@@ -53,12 +52,12 @@ func pathUUID(r *http.Request, name string) (string, error) {
 func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	artist, err := h.artistService.GetArtistByID(r.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusOK, newArtistResponse(artist))
@@ -77,13 +76,13 @@ func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 // @Router       /artists [post]
 func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 	var req createArtistRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
+	if err := decodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	artist := domain.Artist{Name: req.Name, Bio: req.Bio}
 	if err := h.artistService.CreateArtist(r.Context(), &artist); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusCreated, newArtistResponse(&artist))
@@ -103,11 +102,11 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 func (h *ArtistHandler) DeleteArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.artistService.DeleteArtist(r.Context(), id); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondNoContent(w)

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -35,10 +36,9 @@ func seedTrack(t *testing.T, r *TrackRepository, artistID, title string) string 
 func TestPlaylistMembershipIsOrdered(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	quiet := testutil.Quiet()
-	repo := NewPlaylistRepository(db, quiet)
-	tracks := NewTrackRepository(db, quiet)
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	repo := NewPlaylistRepository(db)
+	tracks := NewTrackRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 
 	a := seedTrack(t, tracks, artistID, "a")
 	b := seedTrack(t, tracks, artistID, "b")
@@ -108,10 +108,9 @@ func TestPlaylistMembershipIsOrdered(t *testing.T) {
 func TestPlaylistMutationsReportMissingPlaylists(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	quiet := testutil.Quiet()
-	repo := NewPlaylistRepository(db, quiet)
-	tracks := NewTrackRepository(db, quiet)
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	repo := NewPlaylistRepository(db)
+	tracks := NewTrackRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 	trackID := seedTrack(t, tracks, artistID, "a")
 	missing := "00000000-0000-0000-0000-000000000000"
 
@@ -151,10 +150,9 @@ func TestPlaylistMutationsReportMissingPlaylists(t *testing.T) {
 func TestDeletePlaylistCascadesMembership(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	quiet := testutil.Quiet()
-	repo := NewPlaylistRepository(db, quiet)
-	tracks := NewTrackRepository(db, quiet)
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	repo := NewPlaylistRepository(db)
+	tracks := NewTrackRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 
 	p := &domain.Playlist{Title: "P", TrackIDs: []string{seedTrack(t, tracks, artistID, "a")}}
 	if err := repo.CreatePlaylist(ctx, p); err != nil {
@@ -167,6 +165,89 @@ func TestDeletePlaylistCascadesMembership(t *testing.T) {
 	_ = db.QueryRow("SELECT count(*) FROM playlist_tracks WHERE playlist_id=$1", p.ID).Scan(&n)
 	if n != 0 {
 		t.Fatalf("%d membership rows survived", n)
+	}
+}
+
+// positionsOf reads a playlist's positions in order, for asserting they stay
+// a dense 0..n-1 sequence.
+func positionsOf(t *testing.T, db *sql.DB, playlistID string) []int {
+	t.Helper()
+	rows, err := db.Query(
+		"SELECT position FROM playlist_tracks WHERE playlist_id=$1 ORDER BY position", playlistID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var positions []int
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		positions = append(positions, n)
+	}
+	return positions
+}
+
+// Deleting a track cascades it out of playlist_tracks without renumbering,
+// unlike RemoveTrack - leaving a gap RemoveTrack's own comment claims cannot
+// happen. DeleteTrack now closes that gap itself, including when the track
+// sits in more than one playlist at a position other members do not share.
+func TestDeleteTrackRenumbersEveryPlaylistItLeaves(t *testing.T) {
+	db := testutil.DB(t)
+	ctx := context.Background()
+	playlists := NewPlaylistRepository(db)
+	tracks := NewTrackRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
+
+	a := seedTrack(t, tracks, artistID, "a")
+	b := seedTrack(t, tracks, artistID, "b")
+	c := seedTrack(t, tracks, artistID, "c")
+
+	// b sits in the middle of one playlist and at the end of another, so the
+	// same delete must renumber each independently.
+	p1 := &domain.Playlist{Title: "P1", TrackIDs: []string{a, b, c}}
+	if err := playlists.CreatePlaylist(ctx, p1); err != nil {
+		t.Fatal(err)
+	}
+	p2 := &domain.Playlist{Title: "P2", TrackIDs: []string{a, c, b}}
+	if err := playlists.CreatePlaylist(ctx, p2); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := tracks.DeleteTrack(ctx, b); err != nil {
+		t.Fatalf("delete track: %v", err)
+	}
+
+	if got := positionsOf(t, db, p1.ID); len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("p1 positions after delete = %v, want [0 1]", got)
+	}
+	if got := positionsOf(t, db, p2.ID); len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("p2 positions after delete = %v, want [0 1]", got)
+	}
+
+	got1, err := playlists.GetPlaylistByID(ctx, p1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got1.TrackIDs, ",") != strings.Join([]string{a, c}, ",") {
+		t.Fatalf("p1 membership after delete = %v", got1.TrackIDs)
+	}
+	got2, err := playlists.GetPlaylistByID(ctx, p2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got2.TrackIDs, ",") != strings.Join([]string{a, c}, ",") {
+		t.Fatalf("p2 membership after delete = %v", got2.TrackIDs)
+	}
+
+	// The dense sequence must still hold for a subsequent append.
+	d := seedTrack(t, tracks, artistID, "d")
+	if err := playlists.AddTrack(ctx, p1.ID, d); err != nil {
+		t.Fatal(err)
+	}
+	if got := positionsOf(t, db, p1.ID); len(got) != 3 || got[2] != 2 {
+		t.Fatalf("p1 positions after re-add = %v, want [.. 2]", got)
 	}
 }
 

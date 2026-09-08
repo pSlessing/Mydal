@@ -111,9 +111,12 @@ definitions:
         type: integer
       format:
         type: string
+      has_file:
+        description: |-
+          HasFile says whether an upload has landed, without exposing
+          storage_key, which names an object in the bucket - layout, not API.
+        type: boolean
       id:
-        type: string
-      storage_key:
         type: string
       title:
         type: string
@@ -337,22 +340,6 @@ paths:
       summary: Get artist by ID
       tags:
       - artists
-  /healthz:
-    get:
-      description: Reports that the process is running. Dependencies are deliberately
-        not checked - restarting the server does not fix a database outage.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Liveness probe
-      tags:
-      - health
   /playlists:
     post:
       consumes:
@@ -543,26 +530,6 @@ paths:
       summary: Add track to playlist
       tags:
       - playlists
-  /readyz:
-    get:
-      description: Checks the database and the blob store. Answers 503 with a per-dependency
-        breakdown when either is unreachable.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "503":
-          description: Service Unavailable
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Readiness probe
-      tags:
-      - health
   /tracks:
     post:
       consumes:

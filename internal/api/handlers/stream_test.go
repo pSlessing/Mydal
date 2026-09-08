@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,8 +14,26 @@ import (
 	"mydal/internal/domain"
 	"mydal/internal/repository"
 	"mydal/internal/service"
+	"mydal/internal/storage"
 	"mydal/internal/testutil"
 )
+
+// countingBlobs wraps a real BlobStore and counts calls to Get and Stat, so a
+// test can check how many round trips to the store a request actually made.
+type countingBlobs struct {
+	storage.BlobStore
+	gets, stats int
+}
+
+func (c *countingBlobs) Get(ctx context.Context, key string) (io.ReadSeekCloser, storage.ObjectInfo, error) {
+	c.gets++
+	return c.BlobStore.Get(ctx, key)
+}
+
+func (c *countingBlobs) Stat(ctx context.Context, key string) (storage.ObjectInfo, error) {
+	c.stats++
+	return c.BlobStore.Stat(ctx, key)
+}
 
 // StreamTrack mapped every GetTrackByID error to 404, so a database outage
 // read as a missing track; and when the row existed but the object did not,
@@ -25,10 +44,10 @@ func TestStreamClassifiesItsFailures(t *testing.T) {
 	ctx := context.Background()
 	quiet := testutil.Quiet()
 
-	trackRepo := repository.NewTrackRepository(db, quiet)
+	trackRepo := repository.NewTrackRepository(db)
 	h := NewStreamHandler(service.NewTrackService(trackRepo, blobs, quiet), blobs, quiet)
 	artist := &domain.Artist{Name: "Artist"}
-	if err := repository.NewArtistRepository(db, quiet).CreateArtist(ctx, artist); err != nil {
+	if err := repository.NewArtistRepository(db).CreateArtist(ctx, artist); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +88,7 @@ func TestStreamClassifiesItsFailures(t *testing.T) {
 	if err := blobs.Put(ctx, "tracks/ok.flac", bytes.NewReader(audio), int64(len(audio)), "audio/flac"); err != nil {
 		t.Fatal(err)
 	}
-	if err := trackRepo.SetTrackFile(ctx, tr.ID, "tracks/ok.flac", hash); err != nil {
+	if err := trackRepo.SetTrackFile(ctx, tr.ID, "tracks/ok.flac", hash, "flac", int64(len(audio))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,5 +132,49 @@ func TestStreamClassifiesItsFailures(t *testing.T) {
 	}
 	if rec = get(tr.ID, map[string]string{"Range": "bytes=0-7", "If-Range": `"stale"`}); rec.Code != http.StatusOK {
 		t.Errorf("stale If-Range = %d, want a full 200", rec.Code)
+	}
+}
+
+// The handler used to Stat the object for its metadata, then Get it for the
+// body - two round trips to the store before the first byte went out. Get now
+// returns the metadata itself, so streaming should reach the store exactly
+// once.
+func TestStreamMakesOneRoundTripToTheStore(t *testing.T) {
+	db := testutil.DB(t)
+	blobs := &countingBlobs{BlobStore: testutil.Blobs(t)}
+	ctx := context.Background()
+	quiet := testutil.Quiet()
+
+	trackRepo := repository.NewTrackRepository(db)
+	artist := &domain.Artist{Name: "Artist"}
+	if err := repository.NewArtistRepository(db).CreateArtist(ctx, artist); err != nil {
+		t.Fatal(err)
+	}
+	audio := append([]byte("fLaC"), []byte("some-audio-bytes")...)
+	tr := &domain.Track{Title: "T", ArtistID: artist.ID}
+	if err := trackRepo.CreateTrack(ctx, tr); err != nil {
+		t.Fatal(err)
+	}
+	if err := blobs.Put(ctx, "tracks/ok.flac", bytes.NewReader(audio), int64(len(audio)), "audio/flac"); err != nil {
+		t.Fatal(err)
+	}
+	if err := trackRepo.SetTrackFile(ctx, tr.ID, "tracks/ok.flac", "somehash", "flac", int64(len(audio))); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewStreamHandler(service.NewTrackService(trackRepo, blobs, quiet), blobs, quiet)
+	req := httptest.NewRequest(http.MethodGet, "/tracks/"+tr.ID+"/stream", nil)
+	req.SetPathValue("id", tr.ID)
+	rec := httptest.NewRecorder()
+	h.StreamTrack(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stream = %d: %s", rec.Code, rec.Body)
+	}
+	if blobs.gets != 1 {
+		t.Errorf("Get called %d times, want 1", blobs.gets)
+	}
+	if blobs.stats != 0 {
+		t.Errorf("Stat called %d times, want 0 - streaming should get everything it needs from Get", blobs.stats)
 	}
 }

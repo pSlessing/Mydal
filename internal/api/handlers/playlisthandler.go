@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
 	"mydal/internal/httpx"
@@ -43,12 +41,12 @@ func NewPlaylistHandler(service PlaylistService, logger *slog.Logger) *PlaylistH
 func (h *PlaylistHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	playlist, err := h.service.GetPlaylistByID(r.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusOK, newPlaylistResponse(playlist))
@@ -68,13 +66,13 @@ func (h *PlaylistHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 // @Router       /playlists [post]
 func (h *PlaylistHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request) {
 	var req createPlaylistRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
+	if err := decodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	playlist := req.toDomain()
 	if err := h.service.CreatePlaylist(r.Context(), &playlist); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusCreated, newPlaylistResponse(&playlist))
@@ -94,14 +92,14 @@ func (h *PlaylistHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request)
 func (h *PlaylistHandler) DeletePlaylist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.service.DeletePlaylist(r.Context(), id); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	httpx.RespondNoContent(w)
 }
 
 // AddTrackToPlaylist adds a track to a playlist
@@ -119,19 +117,19 @@ func (h *PlaylistHandler) DeletePlaylist(w http.ResponseWriter, r *http.Request)
 func (h *PlaylistHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Request) {
 	playlistID, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	trackID, err := pathUUID(r, "trackId")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.service.AddTrack(r.Context(), playlistID, trackID); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	httpx.RespondNoContent(w)
 }
 
 // RemoveTrackFromPlaylist removes a track from a playlist
@@ -149,17 +147,17 @@ func (h *PlaylistHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 func (h *PlaylistHandler) RemoveTrackFromPlaylist(w http.ResponseWriter, r *http.Request) {
 	playlistID, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	trackID, err := pathUUID(r, "trackId")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.service.RemoveTrack(r.Context(), playlistID, trackID); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	httpx.RespondNoContent(w)
 }

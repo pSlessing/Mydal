@@ -154,7 +154,10 @@ func BlobsWithClient(t *testing.T) (storage.BlobStore, *minio.Client, string) {
 	}
 	t.Cleanup(func() { removeBucket(client, bucket) })
 
-	return storage.NewMinIOStore(client, bucket, Quiet()), client, bucket
+	// Mirrors config's default MAX_UPLOAD_BYTES; nothing here depends on the
+	// exact value, just that part sizing has a realistic cap to work from.
+	const testMaxUploadBytes = 1 << 30
+	return storage.NewMinIOStore(client, bucket, testMaxUploadBytes, Quiet()), client, bucket
 }
 
 // Keys lists everything in the bucket, for assertions about what an operation

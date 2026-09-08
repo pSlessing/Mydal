@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"mydal/internal/domain"
 	"mydal/internal/httpx"
@@ -39,51 +38,39 @@ func NewStreamHandler(trackService *service.TrackService, blobs storage.BlobStor
 func (h *StreamHandler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 
 	track, err := h.trackService.GetTrackByID(r.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if track.StorageKey == "" {
-		httpx.WriteError(w, h.logger,
+		httpx.WriteError(w, r, h.logger,
 			fmt.Errorf("track %s has no audio file: %w", id, domain.ErrNotFound))
 		return
 	}
 
-	// The blob store wraps a missing object as domain.ErrNotFound, so a row
-	// pointing at an object that is gone answers 404 rather than 500.
-	info, err := h.blobs.Stat(r.Context(), track.StorageKey)
+	// Get returns the object's metadata alongside its body, so this is the
+	// only round trip to the store before the first byte goes out - the
+	// metadata used to come from a separate Stat call first. The blob store
+	// wraps a missing object as domain.ErrNotFound, so a row pointing at an
+	// object that is gone answers 404 rather than 500.
+	body, info, err := h.blobs.Get(r.Context(), track.StorageKey)
 	if err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("stat audio for track %s: %w", id, err))
-		return
-	}
-
-	body, err := h.blobs.Get(r.Context(), track.StorageKey)
-	if err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("open audio for track %s: %w", id, err))
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("open audio for track %s: %w", id, err))
 		return
 	}
 	defer body.Close()
 
+	// http.ServeContent sets Accept-Ranges itself.
 	w.Header().Set("Content-Type", info.ContentType)
 
 	if track.ContentHash != "" {
 		w.Header().Set("ETag", strconv.Quote(track.ContentHash))
 	}
 
-	// Range requests need a seekable body. MinIO objects are; a store whose
-	// reader is not gets a plain sequential response rather than a broken one.
-	if rs, ok := body.(io.ReadSeeker); ok {
-		w.Header().Set("Accept-Ranges", "bytes")
-		http.ServeContent(w, r, info.Key, info.LastModified, rs)
-		return
-	}
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	if _, err := io.Copy(w, body); err != nil {
-		h.logger.Error("Failed to stream track", "error", err)
-	}
+	http.ServeContent(w, r, info.Key, info.LastModified, body)
 }

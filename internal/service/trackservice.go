@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"math"
 	"mydal/internal/domain"
 	"mydal/internal/storage"
 )
@@ -11,7 +12,7 @@ import (
 type TrackRepository interface {
 	GetTrackByID(ctx context.Context, id string) (*domain.Track, error)
 	CreateTrack(ctx context.Context, track *domain.Track) error
-	SetTrackFile(ctx context.Context, id, storageKey, contentHash string) error
+	SetTrackFile(ctx context.Context, id, storageKey, contentHash, format string, fileSize int64) error
 	// DeleteTrack returns the storage key the deleted row held.
 	DeleteTrack(ctx context.Context, id string) (string, error)
 }
@@ -43,11 +44,33 @@ func (s *TrackService) CreateTrack(ctx context.Context, track *domain.Track) err
 			return err
 		}
 	}
+	// duration_ms, bitrate, track_number and disc_number are Postgres INTEGER
+	// (32-bit) columns; file_size is BIGINT. A negative value is nonsense for
+	// all five, and the four INTEGER ones also need an upper bound so an
+	// oversized value fails here rather than as an unclassified 500.
+	if err := requireInRange("duration_ms", track.Duration.Milliseconds(), 0, math.MaxInt32); err != nil {
+		return err
+	}
+	if err := requireInRange("bitrate", int64(track.Bitrate), 0, math.MaxInt32); err != nil {
+		return err
+	}
+	if err := requireInRange("file_size", track.FileSize, 0, math.MaxInt64); err != nil {
+		return err
+	}
+	if err := requireInRange("track_number", int64(track.TrackNumber), 0, math.MaxInt32); err != nil {
+		return err
+	}
+	if err := requireInRange("disc_number", int64(track.DiscNumber), 0, math.MaxInt32); err != nil {
+		return err
+	}
 	return s.trackRepo.CreateTrack(ctx, track)
 }
 
-func (s *TrackService) SetTrackFile(ctx context.Context, id, storageKey, contentHash string) error {
-	return s.trackRepo.SetTrackFile(ctx, id, storageKey, contentHash)
+// SetTrackFile records where an upload landed. format and fileSize come from
+// sniffing and counting the bytes actually uploaded, not from the client's
+// claim at creation time, so they overwrite whatever createTrackRequest set.
+func (s *TrackService) SetTrackFile(ctx context.Context, id, storageKey, contentHash, format string, fileSize int64) error {
+	return s.trackRepo.SetTrackFile(ctx, id, storageKey, contentHash, format, fileSize)
 }
 
 // DeleteTrack removes the row and then the object behind it. The row goes

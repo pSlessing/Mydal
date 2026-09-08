@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,9 +42,9 @@ func newUploadFixture(t *testing.T) uploadFixture {
 	quiet := testutil.Quiet()
 	ctx := context.Background()
 
-	trackRepo := repository.NewTrackRepository(db, quiet)
+	trackRepo := repository.NewTrackRepository(db)
 	artist := &domain.Artist{Name: "Artist"}
-	if err := repository.NewArtistRepository(db, quiet).CreateArtist(ctx, artist); err != nil {
+	if err := repository.NewArtistRepository(db).CreateArtist(ctx, artist); err != nil {
 		t.Fatal(err)
 	}
 	return uploadFixture{
@@ -114,6 +115,33 @@ func TestUploadAcceptsChunkedBodies(t *testing.T) {
 	sum := sha256.Sum256(body)
 	if tr.ContentHash != hex.EncodeToString(sum[:]) {
 		t.Fatalf("content hash = %q, want %s", tr.ContentHash, hex.EncodeToString(sum[:]))
+	}
+}
+
+// format and file_size used to stay whatever the client claimed at creation,
+// even after the real bytes were uploaded and sniffed - so the catalogue
+// could say "mp3" for a file that was actually a FLAC. The upload now
+// overwrites both with what it actually sniffed and counted.
+func TestUploadReconcilesFormatAndFileSize(t *testing.T) {
+	f := newUploadFixture(t)
+	tr := &domain.Track{
+		Title: "T", ArtistID: f.artistID,
+		Format: "mp3", FileSize: 999999,
+	}
+	if err := f.trackRepo.CreateTrack(f.ctx, tr); err != nil {
+		t.Fatal(err)
+	}
+	body := flacBody("this-is-actually-a-flac")
+
+	if rec := f.upload(tr.ID, "", body, false); rec.Code != http.StatusNoContent {
+		t.Fatalf("upload = %d: %s", rec.Code, rec.Body)
+	}
+	got := f.stored(t, tr.ID)
+	if got.Format != "flac" {
+		t.Errorf("format = %q, want flac (the sniffed format, not the client's claim)", got.Format)
+	}
+	if got.FileSize != int64(len(body)) {
+		t.Errorf("file_size = %d, want %d (the uploaded byte count, not the client's claim)", got.FileSize, len(body))
 	}
 }
 
@@ -250,7 +278,7 @@ func TestSameFormatReuploadSurvivesADedupConflict(t *testing.T) {
 		t.Fatal("the failed re-upload deleted track a's live audio")
 	}
 
-	body, err := f.blobs.Get(f.ctx, keyA)
+	body, _, err := f.blobs.Get(f.ctx, keyA)
 	if err != nil {
 		t.Fatalf("track a's object is gone: %v", err)
 	}
@@ -277,6 +305,13 @@ func TestDuplicateAudioIsRejectedAndLeavesNoOrphan(t *testing.T) {
 	rec := f.upload(second, "", audio, false)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("duplicate audio = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not JSON: %v (%s)", err, rec.Body)
+	}
+	if body["code"] != "duplicate_audio" {
+		t.Errorf("code = %q, want duplicate_audio: %s", body["code"], rec.Body)
 	}
 	// The rejected copy's key is random and never recorded anywhere on
 	// failure, so its absence is checked by listing the whole bucket rather

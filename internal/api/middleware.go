@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"log/slog"
 	"mydal/internal/httpx"
 	"net/http"
@@ -10,16 +9,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-type contextKey int
-
-const requestIDKey contextKey = iota
-
-// RequestIDFromContext returns the id assigned to this request, if any.
-func RequestIDFromContext(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey).(string)
-	return id
-}
 
 // responseRecorder captures the status and size for the log line.
 type responseRecorder struct {
@@ -65,7 +54,7 @@ func RequestID(next http.Handler) http.Handler {
 			id = uuid.NewString()
 		}
 		w.Header().Set("X-Request-Id", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey, id)))
+		next.ServeHTTP(w, r.WithContext(httpx.WithRequestID(r.Context(), id)))
 	})
 }
 
@@ -80,7 +69,7 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(rec, r)
 
 			logger.Info("Request",
-				"request_id", RequestIDFromContext(r.Context()),
+				"request_id", httpx.RequestIDFromContext(r.Context()),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rec.status,
@@ -106,7 +95,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 					panic(rvr)
 				}
 				logger.Error("Panic recovered",
-					"request_id", RequestIDFromContext(r.Context()),
+					"request_id", httpx.RequestIDFromContext(r.Context()),
 					"method", r.Method,
 					"path", r.URL.Path,
 					"panic", rvr,
@@ -117,7 +106,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 				if tracker, ok := w.(headerTracker); ok && tracker.headerWritten() {
 					return
 				}
-				httpx.RespondWithError(w, http.StatusInternalServerError, "internal server error")
+				httpx.RespondWithError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 			}()
 			next.ServeHTTP(w, r)
 		})

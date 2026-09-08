@@ -15,6 +15,12 @@ const (
 	foreignKeyViolation = "23503"
 )
 
+// contentHashConstraint is the unique index that makes a second copy of
+// already-stored audio a conflict. Its violation gets its own sentinel
+// (ErrDuplicateAudio) instead of the generic one, so a client can tell "this
+// exact file is already in the library" apart from any other conflict.
+const contentHashConstraint = "tracks_content_hash_key"
+
 // classify turns a constraint violation into the domain sentinel that matches
 // it, so the HTTP layer answers 409 or 400 rather than mapping a client
 // mistake to 500. Errors that are not constraint violations pass through
@@ -27,6 +33,9 @@ func classify(err error) error {
 	}
 	switch pgErr.Code {
 	case uniqueViolation:
+		if pgErr.ConstraintName == contentHashConstraint {
+			return fmt.Errorf("%w: %s already exists", domain.ErrDuplicateAudio, pgErr.ConstraintName)
+		}
 		return fmt.Errorf("%w: %s already exists", domain.ErrConflict, pgErr.ConstraintName)
 	case foreignKeyViolation:
 		return fmt.Errorf("%w: %s references a row that does not exist", domain.ErrInvalidInput, pgErr.ConstraintName)

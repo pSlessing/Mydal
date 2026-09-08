@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +15,16 @@ import (
 	"mydal/internal/service"
 	"mydal/internal/storage"
 	"net/http"
+	"time"
 )
+
+// uploadReadTimeout bounds how long a single upload's body may take to
+// arrive. serve sets no server-wide ReadTimeout, deliberately, because
+// streaming a large audio file back out is a long-lived response - but that
+// leaves nothing to stop a slow or stalled client from holding an upload's
+// connection open indefinitely. This is generous enough for a real album side
+// on a slow link.
+const uploadReadTimeout = 15 * time.Minute
 
 type TrackHandler struct {
 	trackService   *service.TrackService
@@ -48,12 +56,12 @@ func NewTrackHandler(trackService *service.TrackService, blobs storage.BlobStore
 func (h *TrackHandler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	track, err := h.trackService.GetTrackByID(r.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusOK, newTrackResponse(track))
@@ -72,13 +80,13 @@ func (h *TrackHandler) GetTrack(w http.ResponseWriter, r *http.Request) {
 // @Router       /tracks [post]
 func (h *TrackHandler) CreateTrack(w http.ResponseWriter, r *http.Request) {
 	var req createTrackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
+	if err := decodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	track := req.toDomain()
 	if err := h.trackService.CreateTrack(r.Context(), &track); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusCreated, newTrackResponse(&track))
@@ -102,16 +110,24 @@ func (h *TrackHandler) CreateTrack(w http.ResponseWriter, r *http.Request) {
 func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 
 	track, err := h.trackService.GetTrackByID(r.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	previousKey := track.StorageKey
+
+	// Bound how long reading the body may take; the recorder and mux-error
+	// wrapper in the middleware chain both forward Unwrap, so this reaches the
+	// real connection underneath either.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(uploadReadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("set upload read deadline for track %s: %w", id, err))
+		return
+	}
 
 	// Reject an oversized upload before reading it, when the client declared a
 	// length; MaxBytesReader catches the rest, including a chunked body that
@@ -130,25 +146,27 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 			h.writeTooLarge(w)
 			return
 		}
-		httpx.WriteError(w, h.logger, fmt.Errorf("read upload for track %s: %w", id, err))
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("read upload for track %s: %w", id, err))
 		return
 	}
 	head = head[:n]
 	if n == 0 {
-		httpx.WriteError(w, h.logger, fmt.Errorf("%w: request body is empty", domain.ErrInvalidInput))
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("%w: request body is empty", domain.ErrInvalidInput))
 		return
 	}
 	format, ok := sniffAudio(head)
 	if !ok {
-		httpx.WriteError(w, h.logger,
+		httpx.WriteError(w, r, h.logger,
 			fmt.Errorf("%w: body is not a recognised audio format", domain.ErrInvalidInput))
 		return
 	}
 
-	// Hash while the body streams past on its way to the blob store, so the
-	// bytes are read once.
+	// Hash and count while the body streams past on its way to the blob
+	// store, so the bytes are read once. The count is the only trustworthy
+	// file_size: the one on createTrackRequest is just the client's claim.
 	hasher := sha256.New()
-	content := io.TeeReader(io.MultiReader(bytes.NewReader(head), body), hasher)
+	counter := &countingWriter{}
+	content := io.TeeReader(io.MultiReader(bytes.NewReader(head), body), io.MultiWriter(hasher, counter))
 
 	// The key carries a random component so a re-upload can never collide with
 	// the object the track currently points at, even when the format (and so
@@ -156,7 +174,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	// a failed SetTrackFile below delete the track's live audio.
 	suffix := make([]byte, 16)
 	if _, err := rand.Read(suffix); err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("generate storage key for track %s: %w", id, err))
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("generate storage key for track %s: %w", id, err))
 		return
 	}
 	storageKey := fmt.Sprintf("tracks/%s/%s%s", id, hex.EncodeToString(suffix), format.ext)
@@ -171,7 +189,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 			h.writeTooLarge(w)
 			return
 		}
-		httpx.WriteError(w, h.logger, fmt.Errorf("upload track file %s: %w", id, err))
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("upload track file %s: %w", id, err))
 		return
 	}
 
@@ -180,7 +198,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	cleanup := context.WithoutCancel(r.Context())
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 
-	if err := h.trackService.SetTrackFile(cleanup, id, storageKey, contentHash); err != nil {
+	if err := h.trackService.SetTrackFile(cleanup, id, storageKey, contentHash, format.ext[1:], counter.n); err != nil {
 		// Nothing points at the object we just wrote, so take it back out.
 		// This covers the dedup conflict too: the audio is already stored
 		// under another track, and this copy is redundant.
@@ -188,7 +206,7 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("Orphaned object: upload recorded nowhere and could not be removed",
 				"storage_key", storageKey, "error", delErr)
 		}
-		httpx.WriteError(w, h.logger, fmt.Errorf("record file for track %s: %w", id, err))
+		httpx.WriteError(w, r, h.logger, fmt.Errorf("record file for track %s: %w", id, err))
 		return
 	}
 
@@ -203,7 +221,16 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	httpx.RespondNoContent(w)
+}
+
+// countingWriter counts bytes written to it, for measuring an upload's true
+// size as it streams past rather than trusting whatever the client claimed.
+type countingWriter struct{ n int64 }
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	return len(p), nil
 }
 
 // isTooLarge reports whether err is the body cap being hit. MaxBytesReader
@@ -217,7 +244,7 @@ func isTooLarge(err error) bool {
 // writeTooLarge answers 413. It is not a domain sentinel because nothing below
 // the HTTP layer has an opinion about request size.
 func (h *TrackHandler) writeTooLarge(w http.ResponseWriter) {
-	httpx.RespondWithError(w, http.StatusRequestEntityTooLarge, "upload exceeds the maximum allowed size")
+	httpx.RespondWithError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "upload exceeds the maximum allowed size")
 }
 
 // DeleteTrack deletes a track
@@ -234,12 +261,12 @@ func (h *TrackHandler) writeTooLarge(w http.ResponseWriter) {
 func (h *TrackHandler) DeleteTrack(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.trackService.DeleteTrack(r.Context(), id); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	httpx.RespondNoContent(w)
 }

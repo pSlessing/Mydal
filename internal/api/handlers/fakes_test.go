@@ -48,7 +48,7 @@ func (f *fakeTrackRepo) DeleteTrack(ctx context.Context, id string) (string, err
 	return f.track.StorageKey, f.getErr
 }
 
-func (f *fakeTrackRepo) SetTrackFile(ctx context.Context, id, storageKey, contentHash string) error {
+func (f *fakeTrackRepo) SetTrackFile(ctx context.Context, id, storageKey, contentHash, format string, fileSize int64) error {
 	f.reached = append(f.reached, "SetTrackFile")
 	if f.setErr != nil {
 		return f.setErr

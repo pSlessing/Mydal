@@ -5,17 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"mydal/internal/domain"
 )
 
 type AlbumRepository struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db *sql.DB
 }
 
-func NewAlbumRepository(db *sql.DB, logger *slog.Logger) *AlbumRepository {
-	return &AlbumRepository{db: db, logger: logger}
+func NewAlbumRepository(db *sql.DB) *AlbumRepository {
+	return &AlbumRepository{db: db}
 }
 
 func (r *AlbumRepository) GetAlbumByID(ctx context.Context, id string) (*domain.Album, error) {
@@ -29,7 +27,6 @@ func (r *AlbumRepository) GetAlbumByID(ctx context.Context, id string) (*domain.
 		return nil, fmt.Errorf("album %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
-		r.logger.Error("Failed to get album by ID", "error", err)
 		return nil, err
 	}
 	if releaseDate.Valid {
@@ -48,12 +45,10 @@ func (r *AlbumRepository) CreateAlbum(ctx context.Context, album *domain.Album) 
 func (r *AlbumRepository) DeleteAlbum(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, "DELETE FROM albums WHERE id = $1", id)
 	if err != nil {
-		r.logger.Error("Failed to delete album", "error", err)
 		return err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		r.logger.Error("Failed to read rows affected", "error", err)
 		return err
 	}
 	if rows == 0 {

@@ -17,6 +17,7 @@ import (
 	"mydal/internal/api"
 	"mydal/internal/api/handlers"
 	"mydal/internal/config"
+	"mydal/internal/gc"
 	"mydal/internal/logging"
 	"mydal/internal/repository"
 	"mydal/internal/service"
@@ -29,10 +30,13 @@ import (
 	"syscall"
 	"time"
 
+	_ "mydal/cmd/server/docs"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 const (
@@ -84,6 +88,8 @@ func probeReady(addr string) error {
 func run(bootstrap *slog.Logger) error {
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	healthcheck := flag.Bool("healthcheck", false, "probe the local server's /readyz and exit 0 if ready")
+	runGC := flag.Bool("gc", false, "sweep the bucket for objects the catalogue no longer references, and exit")
+	dryRun := flag.Bool("dry-run", false, "with -gc, report what would be deleted without deleting it")
 	flag.Parse()
 
 	// In production the variables come from the environment and there is no
@@ -92,15 +98,22 @@ func run(bootstrap *slog.Logger) error {
 		return fmt.Errorf("load .env: %w", err)
 	}
 
+	// The container image is distroless: no shell, no curl. The binary probes
+	// itself so compose and any orchestrator have a healthcheck to run. This
+	// needs only ADDR, so it is kept off the full config.Load below, which
+	// also requires DATABASE_URL, MINIO_ENDPOINT and BUCKET_NAME - none of
+	// which bear on whether the local server is answering.
+	if *healthcheck {
+		addr, err := config.Addr()
+		if err != nil {
+			return err
+		}
+		return probeReady(addr)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
-	}
-
-	// The container image is distroless: no shell, no curl. The binary probes
-	// itself so compose and any orchestrator have a healthcheck to run.
-	if *healthcheck {
-		return probeReady(cfg.Addr)
 	}
 	logger := logging.New(cfg.LogLevel)
 	logger.Info("Starting server...")
@@ -136,13 +149,17 @@ func run(bootstrap *slog.Logger) error {
 	}
 
 	//init storage
-	blobs := storage.NewMinIOStore(minioClient, cfg.BucketName, logger)
+	blobs := storage.NewMinIOStore(minioClient, cfg.BucketName, cfg.MaxUploadBytes, logger)
+
+	if *runGC {
+		return runOrphanSweep(ctx, db, blobs, *dryRun, logger)
+	}
 
 	//init repo
-	artistRepo := repository.NewArtistRepository(db, logger)
-	trackRepo := repository.NewTrackRepository(db, logger)
-	albumRepo := repository.NewAlbumRepository(db, logger)
-	playlistRepo := repository.NewPlaylistRepository(db, logger)
+	artistRepo := repository.NewArtistRepository(db)
+	trackRepo := repository.NewTrackRepository(db)
+	albumRepo := repository.NewAlbumRepository(db)
+	playlistRepo := repository.NewPlaylistRepository(db)
 
 	//init service
 	artistService := service.NewArtistService(artistRepo, blobs, logger)
@@ -161,7 +178,41 @@ func run(bootstrap *slog.Logger) error {
 	//init router
 	router := api.NewRouter(artistHandler, trackHandler, albumHandler, streamHandler, playlistHandler, healthHandler, logger)
 
+	// The docs UI is not part of the versioned API surface, and wiring it
+	// here - rather than inside internal/api - keeps that library package
+	// from depending on cmd/server/docs, the entry point's own generated code.
+	router.Handle("GET /swagger/", httpSwagger.Handler())
+
 	return serve(ctx, cfg.Addr, router, logger)
+}
+
+// runOrphanSweep lists the bucket, lists every track's storage_key, deletes
+// objects with no row unless dryRun, and reports rows whose object is
+// missing. Every "Orphaned object" log line elsewhere in the codebase is a
+// promise that this exists.
+func runOrphanSweep(ctx context.Context, db *sql.DB, blobs storage.BlobStore, dryRun bool, logger *slog.Logger) error {
+	storageKeys, err := repository.NewTrackRepository(db).AllStorageKeys(ctx)
+	if err != nil {
+		return fmt.Errorf("list track storage keys: %w", err)
+	}
+
+	report, sweepErr := gc.Sweep(ctx, blobs, storageKeys, dryRun)
+	if sweepErr != nil {
+		logger.Error("Orphan sweep failed to delete some objects", "error", sweepErr)
+	}
+	action := "Deleted orphaned object"
+	if dryRun {
+		action = "Would delete orphaned object (dry run)"
+	}
+	for _, key := range report.Orphaned {
+		logger.Info(action, "storage_key", key)
+	}
+	for _, key := range report.Missing {
+		logger.Warn("Track references a missing object", "storage_key", key)
+	}
+	logger.Info("Orphan sweep complete",
+		"orphaned", len(report.Orphaned), "missing", len(report.Missing), "dry_run", dryRun)
+	return sweepErr
 }
 
 func openDB(ctx context.Context, cfg config.Config) (*sql.DB, error) {

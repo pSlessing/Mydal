@@ -96,13 +96,18 @@ $ curl -s localhost:8080/api/v1/artists -d '{"name":"Aphex Twin","bio":"Cornwall
 {"id":"...","name":"Aphex Twin","bio":"Cornwall","created_at":"..."}
 ```
 
-Errors carry a JSON body and a meaningful status: `400` for malformed input or
-a non-UUID id, `404` for a missing resource, `409` for a conflict, `500` for
-anything unclassified — whose detail is logged rather than returned. Every
-endpoint answers errors this way, with one exception the spec records: an
-unsatisfiable `Range` on `/stream` returns a plain-text `416` written by
-`net/http`'s own range handling. Every response carries an `X-Request-Id`,
-echoing the request's own if it sent one.
+Errors carry a JSON body — `{"code": "...", "error": "..."}` — and a
+meaningful status: `400` for malformed input or a non-UUID id, `404` for a
+missing resource, `409` for a conflict, `500` for anything unclassified —
+whose detail is logged rather than returned. `code` is the stable part: one of
+`not_found`, `invalid_input`, `conflict`, `duplicate_audio` (a conflict
+specifically from re-uploading audio already stored under another track),
+`method_not_allowed`, or `internal_error`. `error` is a human-readable message
+and may change wording, so branch on `code`, not on parsing it. Every endpoint
+answers errors this way, with one exception the spec records: an unsatisfiable
+`Range` on `/stream` returns a plain-text `416` written by `net/http`'s own
+range handling. Every response carries an `X-Request-Id`, echoing the
+request's own if it sent one.
 
 ## Health
 
@@ -115,6 +120,14 @@ Both sit outside `/api/v1`, so an orchestrator's healthcheck survives an API
 version bump. The container image is distroless and has no shell or curl, so
 the binary probes itself — `mydal -healthcheck` exits `0` when the local server
 reports ready, which is what compose runs.
+
+## Maintenance
+
+Deletes are row-first-then-object, so a crash between the two can leave a
+storage object nothing references. `mydal -gc` reclaims those: it lists the
+bucket, lists every track's `storage_key`, deletes objects with no row, and
+logs any row whose object is missing (a broken track it cannot fix). Add
+`-dry-run` to see the report without deleting anything.
 
 ## Tests
 
@@ -141,8 +154,11 @@ did not talk to the real schema.
 
 Swagger UI is served at `http://localhost:8080/swagger/` while the server is
 running, and the generated spec is published to
-<https://pslessing.github.io/Mydal/> on every push to `main`. Regenerate it
-after changing routes or annotations:
+<https://pslessing.github.io/Mydal/> on every push to `main`. It covers only
+the versioned API under `/api/v1`; `/healthz` and `/readyz` sit outside it (see
+[Health](#health) above) and carry no swag annotations, since `@BasePath` would
+otherwise publish them at a path that 404s. Regenerate the spec after changing
+routes or annotations:
 
 ```sh
 make swagger

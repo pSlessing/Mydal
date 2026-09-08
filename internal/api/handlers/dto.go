@@ -67,35 +67,40 @@ func (r createTrackRequest) toDomain() domain.Track {
 }
 
 type trackResponse struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	ArtistID    string    `json:"artist_id"`
-	AlbumID     string    `json:"album_id,omitempty"`
-	DurationMs  int64     `json:"duration_ms"`
-	Bitrate     int       `json:"bitrate"`
-	Format      string    `json:"format"`
-	FileSize    int64     `json:"file_size"`
-	TrackNumber int       `json:"track_number"`
-	DiscNumber  int       `json:"disc_number"`
-	StorageKey  string    `json:"storage_key,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	ArtistID    string  `json:"artist_id"`
+	AlbumID     *string `json:"album_id"`
+	DurationMs  int64   `json:"duration_ms"`
+	Bitrate     int     `json:"bitrate"`
+	Format      string  `json:"format"`
+	FileSize    int64   `json:"file_size"`
+	TrackNumber int     `json:"track_number"`
+	DiscNumber  int     `json:"disc_number"`
+	// HasFile says whether an upload has landed, without exposing
+	// storage_key, which names an object in the bucket - layout, not API.
+	HasFile   bool      `json:"has_file"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func newTrackResponse(t *domain.Track) trackResponse {
-	return trackResponse{
+	resp := trackResponse{
 		ID:          t.ID,
 		Title:       t.Title,
 		ArtistID:    t.ArtistID,
-		AlbumID:     t.AlbumID,
 		DurationMs:  t.Duration.Milliseconds(),
 		Bitrate:     t.Bitrate,
 		Format:      t.Format,
 		FileSize:    t.FileSize,
 		TrackNumber: t.TrackNumber,
 		DiscNumber:  t.DiscNumber,
-		StorageKey:  t.StorageKey,
+		HasFile:     t.StorageKey != "",
 		CreatedAt:   t.CreatedAt,
 	}
+	if t.AlbumID != "" {
+		resp.AlbumID = &t.AlbumID
+	}
+	return resp
 }
 
 type createAlbumRequest struct {
@@ -124,7 +129,7 @@ type albumResponse struct {
 	Title       string    `json:"title"`
 	ArtistID    string    `json:"artist_id"`
 	ReleaseDate *string   `json:"release_date"`
-	CoverKey    string    `json:"cover_key,omitempty"`
+	CoverKey    *string   `json:"cover_key"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -133,12 +138,14 @@ func newAlbumResponse(a *domain.Album) albumResponse {
 		ID:        a.ID,
 		Title:     a.Title,
 		ArtistID:  a.ArtistID,
-		CoverKey:  a.CoverKey,
 		CreatedAt: a.CreatedAt,
 	}
 	if a.ReleaseDate != nil {
 		formatted := a.ReleaseDate.Format(dateLayout)
 		resp.ReleaseDate = &formatted
+	}
+	if a.CoverKey != "" {
+		resp.CoverKey = &a.CoverKey
 	}
 	return resp
 }

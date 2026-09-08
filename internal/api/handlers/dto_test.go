@@ -34,39 +34,34 @@ func postJSON(fn http.HandlerFunc, body string) *httptest.ResponseRecorder {
 
 // A client-supplied storage_key used to reach the insert, which let a caller
 // point a new track row at any object already in the bucket - and then stream
-// it. The same hole existed for an album's cover_key.
-func TestServerOwnedFieldsAreNotSettable(t *testing.T) {
+// it. The same hole existed for an album's cover_key. decodeJSON now disallows
+// any field a request DTO does not declare, so naming a server-owned field is
+// a 400 that never reaches the service, rather than a value the DTO happened
+// to have no field for.
+func TestServerOwnedFieldsAreRejected(t *testing.T) {
 	quiet := testutil.Quiet()
 
 	repo := &fakeTrackRepo{}
 	trackH := NewTrackHandler(newTestTrackService(repo), nil, 1<<20, quiet)
 	rec := postJSON(trackH.CreateTrack, `{
 		"title":"T","artist_id":"11111111-1111-1111-1111-111111111111",
-		"storage_key":"tracks/someone-elses.mp3","StorageKey":"tracks/someone-elses.mp3",
-		"content_hash":"deadbeef","ContentHash":"deadbeef",
-		"id":"client-chosen","ID":"client-chosen","created_at":"1999-01-01T00:00:00Z"
+		"storage_key":"tracks/someone-elses.mp3"
 	}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create = %d: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create with storage_key = %d, want 400: %s", rec.Code, rec.Body)
 	}
-	if repo.created.StorageKey != "" {
-		t.Errorf("client set storage_key: %q", repo.created.StorageKey)
-	}
-	if repo.created.ContentHash != "" {
-		t.Errorf("client set content_hash: %q", repo.created.ContentHash)
-	}
-	if repo.created.ID != "server-generated" {
-		t.Errorf("client set id: %q", repo.created.ID)
+	if len(repo.reached) != 0 {
+		t.Errorf("a rejected body still reached the repository: %v", repo.reached)
 	}
 
 	albums := &fakeAlbumService{}
 	albumH := NewAlbumHandler(albums, quiet)
 	rec = postJSON(albumH.CreateAlbum, `{"title":"A","artist_id":"11111111-1111-1111-1111-111111111111","cover_key":"covers/hijack"}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("album create = %d: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("album create with cover_key = %d, want 400: %s", rec.Code, rec.Body)
 	}
-	if albums.created.CoverKey != "" {
-		t.Errorf("client set cover_key: %q", albums.created.CoverKey)
+	if len(albums.reached) != 0 {
+		t.Errorf("a rejected body still reached the service: %v", albums.reached)
 	}
 }
 
@@ -85,14 +80,14 @@ func TestResponsesAreSnakeCase(t *testing.T) {
 			"track",
 			postJSON(NewTrackHandler(newTestTrackService(&fakeTrackRepo{}), nil, 1<<20, quiet).CreateTrack,
 				`{"title":"T","artist_id":"`+id+`"}`),
-			[]string{"artist_id", "bitrate", "created_at", "disc_number", "duration_ms",
-				"file_size", "format", "id", "title", "track_number"},
+			[]string{"album_id", "artist_id", "bitrate", "created_at", "disc_number", "duration_ms",
+				"file_size", "format", "has_file", "id", "title", "track_number"},
 		},
 		{
 			"album",
 			postJSON(NewAlbumHandler(&fakeAlbumService{}, quiet).CreateAlbum,
 				`{"title":"A","artist_id":"`+id+`"}`),
-			[]string{"artist_id", "created_at", "id", "release_date", "title"},
+			[]string{"artist_id", "cover_key", "created_at", "id", "release_date", "title"},
 		},
 		{
 			"playlist",

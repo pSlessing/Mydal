@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
 	"mydal/internal/httpx"
@@ -41,12 +39,12 @@ func NewAlbumHandler(service AlbumService, logger *slog.Logger) *AlbumHandler {
 func (h *AlbumHandler) GetAlbum(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	album, err := h.service.GetAlbumByID(r.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusOK, newAlbumResponse(album))
@@ -65,17 +63,17 @@ func (h *AlbumHandler) GetAlbum(w http.ResponseWriter, r *http.Request) {
 // @Router       /albums [post]
 func (h *AlbumHandler) CreateAlbum(w http.ResponseWriter, r *http.Request) {
 	var req createAlbumRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
+	if err := decodeJSON(w, r, &req); err != nil {
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	album, err := req.toDomain()
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.service.CreateAlbum(r.Context(), &album); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	httpx.RespondWithJSON(w, http.StatusCreated, newAlbumResponse(&album))
@@ -95,12 +93,12 @@ func (h *AlbumHandler) CreateAlbum(w http.ResponseWriter, r *http.Request) {
 func (h *AlbumHandler) DeleteAlbum(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
 	if err := h.service.DeleteAlbum(r.Context(), id); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	httpx.RespondNoContent(w)
 }

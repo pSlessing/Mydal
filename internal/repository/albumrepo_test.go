@@ -17,9 +17,8 @@ import (
 func TestAlbumRoundTripsEveryColumn(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	quiet := testutil.Quiet()
-	repo := NewAlbumRepository(db, quiet)
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	repo := NewAlbumRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 
 	released := time.Date(1979, 8, 17, 0, 0, 0, 0, time.UTC)
 	album := &domain.Album{
@@ -57,9 +56,8 @@ func TestAlbumRoundTripsEveryColumn(t *testing.T) {
 func TestAlbumReleaseDateIsNullable(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	quiet := testutil.Quiet()
-	repo := NewAlbumRepository(db, quiet)
-	artistID := seedArtist(t, NewArtistRepository(db, quiet))
+	repo := NewAlbumRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
 
 	album := &domain.Album{Title: "Untitled", ArtistID: artistID}
 	if err := repo.CreateAlbum(ctx, album); err != nil {
@@ -82,7 +80,7 @@ func TestAlbumReleaseDateIsNullable(t *testing.T) {
 func TestAlbumMissingIsNotFound(t *testing.T) {
 	db := testutil.DB(t)
 	ctx := context.Background()
-	repo := NewAlbumRepository(db, testutil.Quiet())
+	repo := NewAlbumRepository(db)
 	missing := "00000000-0000-0000-0000-000000000000"
 
 	if _, err := repo.GetAlbumByID(ctx, missing); !errors.Is(err, domain.ErrNotFound) {

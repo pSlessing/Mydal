@@ -24,11 +24,20 @@ type BlobStore interface {
 	// Put writes an object. A negative size means the length is unknown and
 	// the reader is streamed.
 	Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
-	// Get opens an object for reading. The caller closes it.
-	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	// Get opens an object for reading and returns its metadata alongside it,
+	// so a caller that needs both (streaming, which sets headers from the
+	// metadata before serving the body) does it in one round trip rather than
+	// a Stat followed by a Get. The caller closes it. Every implementation is
+	// expected to return a seekable reader - range requests need one, and
+	// every store this interface has, or is expected to gain, is - so this
+	// is not io.ReadCloser.
+	Get(ctx context.Context, key string) (io.ReadSeekCloser, ObjectInfo, error)
 	// Stat returns an object's metadata.
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	Delete(ctx context.Context, key string) error
+	// List returns every key currently in the store, for the orphan sweep to
+	// compare against the catalogue.
+	List(ctx context.Context) ([]string, error)
 	// Ping reports whether the store is reachable and the bucket usable. It
 	// backs the readiness probe, so it must be cheap.
 	Ping(ctx context.Context) error

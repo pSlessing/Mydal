@@ -58,13 +58,30 @@ jobs:
           done
           echo "MinIO did not become ready"; docker logs minio; exit 1
 
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            echo "The above files are not gofmt'd. Run: gofmt -w ."
+            exit 1
+          fi
+
+      - name: Check go.mod/go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
       - name: Vet
         run: go vet ./...
 
+      # Pinned rather than "latest", so whether this job is red does not
+      # depend on what the linter's latest release happens to be on a given
+      # day.
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.13.2
 
       - name: Test
         run: go test -race ./...
@@ -74,3 +91,29 @@ jobs:
 
       - name: Build image
         run: docker build -t mydal:ci .
+
+      # The distroless base has no shell, so a broken ENTRYPOINT or a missing
+      # shared library would otherwise only surface once the image reached
+      # production. This starts the real image against the job's own
+      # Postgres and MinIO and polls the binary's own -healthcheck, the same
+      # probe the container's HEALTHCHECK runs, until it reports ready.
+      - name: Smoke test the image
+        run: |
+          docker run -d --name mydal-smoke --network host \
+            -e ADDR=:8081 \
+            -e DATABASE_URL="postgresql://postgres:secret@localhost:5432/musicdb?sslmode=disable" \
+            -e MINIO_ENDPOINT=localhost:9000 \
+            -e MINIO_ACCESS_KEY=minioadmin \
+            -e MINIO_SECRET_KEY=minioadmin \
+            -e BUCKET_NAME=mydal-smoke \
+            mydal:ci
+          ok=""
+          for i in $(seq 1 30); do
+            if docker exec mydal-smoke /mydal -healthcheck; then
+              ok=1; break
+            fi
+            sleep 1
+          done
+          docker logs mydal-smoke
+          docker rm -f mydal-smoke
+          [ -n "$ok" ] || { echo "image never became healthy"; exit 1; }

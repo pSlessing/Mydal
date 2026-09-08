@@ -26,3 +26,14 @@ func requireUUID(field, value string) error {
 	}
 	return nil
 }
+
+// requireInRange rejects a numeric field outside [min, max]. This catches not
+// only a client-sent negative value but also one too large for the Postgres
+// column behind it: an out-of-range INSERT is SQLSTATE 22003, which classify
+// does not recognise, so it would otherwise reach the client as a 500.
+func requireInRange(field string, value, min, max int64) error {
+	if value < min || value > max {
+		return fmt.Errorf("%w: %s must be between %d and %d, got %d", domain.ErrInvalidInput, field, min, max, value)
+	}
+	return nil
+}

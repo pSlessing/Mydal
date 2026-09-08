@@ -20,7 +20,7 @@ services:
       start_period: 5s
 
   bucket:
-    container_name: mydal
+    container_name: mydal-minio
     image: minio/minio
     command: server /data --console-address ":9001"
     environment:

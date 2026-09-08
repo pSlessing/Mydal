@@ -5,17 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"mydal/internal/domain"
 )
 
 type PlaylistRepository struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db *sql.DB
 }
 
-func NewPlaylistRepository(db *sql.DB, logger *slog.Logger) *PlaylistRepository {
-	return &PlaylistRepository{db: db, logger: logger}
+func NewPlaylistRepository(db *sql.DB) *PlaylistRepository {
+	return &PlaylistRepository{db: db}
 }
 
 func (r *PlaylistRepository) GetPlaylistByID(ctx context.Context, id string) (*domain.Playlist, error) {
@@ -27,13 +25,11 @@ func (r *PlaylistRepository) GetPlaylistByID(ctx context.Context, id string) (*d
 		return nil, fmt.Errorf("playlist %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
-		r.logger.Error("Failed to get playlist by ID", "error", err)
 		return nil, err
 	}
 
 	p.TrackIDs, err = r.trackIDs(ctx, id)
 	if err != nil {
-		r.logger.Error("Failed to get playlist tracks", "error", err)
 		return nil, err
 	}
 	return &p, nil
@@ -42,7 +38,6 @@ func (r *PlaylistRepository) GetPlaylistByID(ctx context.Context, id string) (*d
 func (r *PlaylistRepository) CreatePlaylist(ctx context.Context, p *domain.Playlist) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		r.logger.Error("Failed to begin transaction", "error", err)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -51,7 +46,6 @@ func (r *PlaylistRepository) CreatePlaylist(ctx context.Context, p *domain.Playl
 		"INSERT INTO playlists (title, description) VALUES ($1, $2) RETURNING id, created_at, updated_at",
 		p.Title, p.Description,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt); err != nil {
-		r.logger.Error("Failed to create playlist", "error", err)
 		return err
 	}
 
@@ -60,7 +54,6 @@ func (r *PlaylistRepository) CreatePlaylist(ctx context.Context, p *domain.Playl
 			"INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES ($1, $2, $3)",
 			p.ID, trackID, i,
 		); err != nil {
-			r.logger.Error("Failed to add track to new playlist", "error", err)
 			return classify(err)
 		}
 	}
@@ -71,12 +64,10 @@ func (r *PlaylistRepository) CreatePlaylist(ctx context.Context, p *domain.Playl
 func (r *PlaylistRepository) DeletePlaylist(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, "DELETE FROM playlists WHERE id = $1", id)
 	if err != nil {
-		r.logger.Error("Failed to delete playlist", "error", err)
 		return err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		r.logger.Error("Failed to read rows affected", "error", err)
 		return err
 	}
 	if rows == 0 {
@@ -90,7 +81,6 @@ func (r *PlaylistRepository) DeletePlaylist(ctx context.Context, id string) erro
 func (r *PlaylistRepository) AddTrack(ctx context.Context, playlistID, trackID string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		r.logger.Error("Failed to begin transaction", "error", err)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -105,7 +95,6 @@ func (r *PlaylistRepository) AddTrack(ctx context.Context, playlistID, trackID s
 		 ON CONFLICT (playlist_id, track_id) DO NOTHING`,
 		playlistID, trackID,
 	); err != nil {
-		r.logger.Error("Failed to add track to playlist", "error", err)
 		return classify(err)
 	}
 
@@ -119,7 +108,6 @@ func (r *PlaylistRepository) AddTrack(ctx context.Context, playlistID, trackID s
 func (r *PlaylistRepository) RemoveTrack(ctx context.Context, playlistID, trackID string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		r.logger.Error("Failed to begin transaction", "error", err)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -137,7 +125,6 @@ func (r *PlaylistRepository) RemoveTrack(ctx context.Context, playlistID, trackI
 		return fmt.Errorf("track %s in playlist %s: %w", trackID, playlistID, domain.ErrNotFound)
 	}
 	if err != nil {
-		r.logger.Error("Failed to remove track from playlist", "error", err)
 		return err
 	}
 
@@ -145,7 +132,6 @@ func (r *PlaylistRepository) RemoveTrack(ctx context.Context, playlistID, trackI
 		"UPDATE playlist_tracks SET position = position - 1 WHERE playlist_id = $1 AND position > $2",
 		playlistID, position,
 	); err != nil {
-		r.logger.Error("Failed to renumber playlist positions", "error", err)
 		return err
 	}
 

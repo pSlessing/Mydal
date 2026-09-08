@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"mydal/internal/domain"
 	"time"
 )
@@ -17,12 +16,11 @@ const trackColumns = `id, title, artist_id, album_id, duration_ms, bitrate,
 	created_at`
 
 type TrackRepository struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db *sql.DB
 }
 
-func NewTrackRepository(db *sql.DB, logger *slog.Logger) *TrackRepository {
-	return &TrackRepository{db: db, logger: logger}
+func NewTrackRepository(db *sql.DB) *TrackRepository {
+	return &TrackRepository{db: db}
 }
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows.
@@ -60,7 +58,6 @@ func (r *TrackRepository) GetTrackByID(ctx context.Context, id string) (*domain.
 		return nil, fmt.Errorf("track %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
-		r.logger.Error("Failed to get track by ID", "error", err)
 		return nil, err
 	}
 	return track, nil
@@ -83,37 +80,106 @@ func (r *TrackRepository) CreateTrack(ctx context.Context, track *domain.Track) 
 // caller can delete the object the catalogue no longer points at. The key is
 // returned rather than looked up separately because only the DELETE knows
 // which row it actually removed.
+//
+// A track can belong to several playlists at once, and playlist_tracks.
+// track_id is ON DELETE CASCADE, so the DELETE below silently drops a
+// membership row out of each - leaving a gap in what RemoveTrack documents as
+// a dense 0..n-1 position sequence. The gap left by each membership is only
+// knowable before the cascade removes it, so those (playlist_id, position)
+// pairs are read first, inside the same transaction, and each playlist is
+// renumbered after the delete commits its effect.
 func (r *TrackRepository) DeleteTrack(ctx context.Context, id string) (string, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx,
+		"SELECT playlist_id, position FROM playlist_tracks WHERE track_id = $1", id)
+	if err != nil {
+		return "", err
+	}
+	type membership struct {
+		playlistID string
+		position   int
+	}
+	var memberships []membership
+	for rows.Next() {
+		var m membership
+		if err := rows.Scan(&m.playlistID, &m.position); err != nil {
+			rows.Close()
+			return "", err
+		}
+		memberships = append(memberships, m)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
 	var storageKey string
-	err := r.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		"DELETE FROM tracks WHERE id = $1 RETURNING storage_key", id,
 	).Scan(&storageKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("track %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
-		r.logger.Error("Failed to delete track", "error", err)
+		return "", err
+	}
+
+	for _, m := range memberships {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE playlist_tracks SET position = position - 1 WHERE playlist_id = $1 AND position > $2",
+			m.playlistID, m.position,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return "", err
 	}
 	return storageKey, nil
 }
 
-// SetTrackFile records where an uploaded file landed and what it hashes to.
-// The two move together - a key without its hash would leave the dedup index
-// blind to an object that is already stored - so they are written in one
-// statement. A hash that another track already holds is a conflict, which is
-// what makes the unique index a dedup check rather than just an integrity one.
-func (r *TrackRepository) SetTrackFile(ctx context.Context, id, storageKey, contentHash string) error {
-	result, err := r.db.ExecContext(ctx,
-		"UPDATE tracks SET storage_key = $1, content_hash = $2 WHERE id = $3",
-		storageKey, contentHash, id)
+// AllStorageKeys returns the storage_key of every track that has a file, for
+// the orphan sweep to compare against the bucket's own listing.
+func (r *TrackRepository) AllStorageKeys(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT storage_key FROM tracks WHERE storage_key <> ''")
 	if err != nil {
-		r.logger.Error("Failed to record track file", "error", err)
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// SetTrackFile records where an uploaded file landed, what it hashes to, and
+// the format and size sniffed and counted from the bytes actually uploaded -
+// which is what makes them trustworthy, unlike the same-named fields on
+// createTrackRequest, which are only ever the client's claim. They are
+// written in one statement with the key and hash because all four describe
+// the same upload. A hash that another track already holds is a conflict,
+// which is what makes the unique index a dedup check rather than just an
+// integrity one.
+func (r *TrackRepository) SetTrackFile(ctx context.Context, id, storageKey, contentHash, format string, fileSize int64) error {
+	result, err := r.db.ExecContext(ctx,
+		"UPDATE tracks SET storage_key = $1, content_hash = $2, format = $3, file_size = $4 WHERE id = $5",
+		storageKey, contentHash, format, fileSize, id)
+	if err != nil {
 		return classify(err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		r.logger.Error("Failed to read rows affected", "error", err)
 		return err
 	}
 	if rows == 0 {
