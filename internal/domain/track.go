@@ -15,5 +15,6 @@ type Track struct {
 	TrackNumber int
 	DiscNumber  int
 	StorageKey  string // path in S3 or local fs
+	ContentHash string
 	CreatedAt   time.Time
 }

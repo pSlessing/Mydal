@@ -1,28 +1,42 @@
 package service
 
 import (
+	"context"
 	"log/slog"
 	"mydal/internal/domain"
-	"mydal/internal/repository"
 )
 
+// AlbumRepository is the persistence the album service needs. It is declared
+// here, at the consumer, so the service can be tested without Postgres.
+type AlbumRepository interface {
+	GetAlbumByID(ctx context.Context, id string) (*domain.Album, error)
+	CreateAlbum(ctx context.Context, album *domain.Album) error
+	DeleteAlbum(ctx context.Context, id string) error
+}
+
 type AlbumService struct {
-	repo   *repository.AlbumRepository
+	repo   AlbumRepository
 	logger *slog.Logger
 }
 
-func NewAlbumService(repo *repository.AlbumRepository, logger *slog.Logger) *AlbumService {
+func NewAlbumService(repo AlbumRepository, logger *slog.Logger) *AlbumService {
 	return &AlbumService{repo: repo, logger: logger}
 }
 
-func (s *AlbumService) GetAlbumByID(id string) (*domain.Album, error) {
-	return s.repo.GetAlbumByID(id)
+func (s *AlbumService) GetAlbumByID(ctx context.Context, id string) (*domain.Album, error) {
+	return s.repo.GetAlbumByID(ctx, id)
 }
 
-func (s *AlbumService) CreateAlbum(album *domain.Album) error {
-	return s.repo.CreateAlbum(album)
+func (s *AlbumService) CreateAlbum(ctx context.Context, album *domain.Album) error {
+	if err := requireNonEmpty("title", album.Title); err != nil {
+		return err
+	}
+	if err := requireUUID("artist_id", album.ArtistID); err != nil {
+		return err
+	}
+	return s.repo.CreateAlbum(ctx, album)
 }
 
-func (s *AlbumService) DeleteAlbum(id string) error {
-	return s.repo.DeleteAlbum(id)
+func (s *AlbumService) DeleteAlbum(ctx context.Context, id string) error {
+	return s.repo.DeleteAlbum(ctx, id)
 }

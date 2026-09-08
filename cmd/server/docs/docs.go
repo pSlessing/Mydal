@@ -35,7 +35,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Album"
+                            "$ref": "#/definitions/internal_api_handlers.createAlbumRequest"
                         }
                     }
                 ],
@@ -43,7 +43,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Album"
+                            "$ref": "#/definitions/internal_api_handlers.albumResponse"
                         }
                     },
                     "400": {
@@ -90,11 +90,29 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Album"
+                            "$ref": "#/definitions/internal_api_handlers.albumResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -106,6 +124,9 @@ const docTemplate = `{
             },
             "delete": {
                 "description": "Remove an album from the database by ID",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "albums"
                 ],
@@ -122,6 +143,24 @@ const docTemplate = `{
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     },
                     "500": {
                         "description": "Internal Server Error",
@@ -155,7 +194,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Artist"
+                            "$ref": "#/definitions/internal_api_handlers.createArtistRequest"
                         }
                     }
                 ],
@@ -163,7 +202,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Artist"
+                            "$ref": "#/definitions/internal_api_handlers.artistResponse"
                         }
                     },
                     "400": {
@@ -210,11 +249,29 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Artist"
+                            "$ref": "#/definitions/internal_api_handlers.artistResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -226,6 +283,9 @@ const docTemplate = `{
             },
             "delete": {
                 "description": "Remove an artist from the database by ID",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "artists"
                 ],
@@ -243,8 +303,49 @@ const docTemplate = `{
                     "204": {
                         "description": "No Content"
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/healthz": {
+            "get": {
+                "description": "Reports that the process is running. Dependencies are deliberately not checked - restarting the server does not fix a database outage.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Liveness probe",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -275,7 +376,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
+                            "$ref": "#/definitions/internal_api_handlers.createPlaylistRequest"
                         }
                     }
                 ],
@@ -283,11 +384,20 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
+                            "$ref": "#/definitions/internal_api_handlers.playlistResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -330,11 +440,29 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Playlist"
+                            "$ref": "#/definitions/internal_api_handlers.playlistResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -346,6 +474,9 @@ const docTemplate = `{
             },
             "delete": {
                 "description": "Remove a playlist from the database by ID",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "playlists"
                 ],
@@ -363,6 +494,24 @@ const docTemplate = `{
                     "204": {
                         "description": "No Content"
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -378,6 +527,9 @@ const docTemplate = `{
         "/playlists/{id}/tracks/{trackId}": {
             "put": {
                 "description": "Add an existing track to an existing playlist",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "playlists"
                 ],
@@ -402,6 +554,24 @@ const docTemplate = `{
                     "204": {
                         "description": "No Content"
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -415,6 +585,9 @@ const docTemplate = `{
             },
             "delete": {
                 "description": "Remove a track from an existing playlist",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "playlists"
                 ],
@@ -439,6 +612,24 @@ const docTemplate = `{
                     "204": {
                         "description": "No Content"
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -446,6 +637,34 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/readyz": {
+            "get": {
+                "description": "Checks the database and the blob store. Answers 503 with a per-dependency breakdown when either is unreachable.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Readiness probe",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -471,7 +690,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Track"
+                            "$ref": "#/definitions/internal_api_handlers.createTrackRequest"
                         }
                     }
                 ],
@@ -479,7 +698,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Track"
+                            "$ref": "#/definitions/internal_api_handlers.trackResponse"
                         }
                     },
                     "400": {
@@ -526,7 +745,16 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/mydal_internal_domain.Track"
+                            "$ref": "#/definitions/internal_api_handlers.trackResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
@@ -537,27 +765,6 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Remove a track from the database by ID",
-                "tags": [
-                    "tracks"
-                ],
-                "summary": "Delete a track",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Track ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
                     },
                     "500": {
                         "description": "Internal Server Error",
@@ -569,31 +776,22 @@ const docTemplate = `{
                         }
                     }
                 }
-            }
-        },
-        "/tracks/{id}/file": {
-            "put": {
-                "description": "Upload the audio binary for an existing track. Content-Type must be an audio MIME type.",
-                "consumes": [
-                    "application/octet-stream"
+            },
+            "delete": {
+                "description": "Remove a track from the database by ID",
+                "produces": [
+                    "application/json"
                 ],
                 "tags": [
                     "tracks"
                 ],
-                "summary": "Upload track audio file",
+                "summary": "Delete a track",
                 "parameters": [
                     {
                         "type": "string",
                         "description": "Track ID",
                         "name": "id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "file",
-                        "description": "Audio file binary",
-                        "name": "file",
-                        "in": "formData",
                         "required": true
                     }
                 ],
@@ -612,6 +810,89 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tracks/{id}/file": {
+            "put": {
+                "description": "Upload the audio binary for an existing track. The format is detected from the file's own bytes; the Content-Type header is ignored. A chunked body without Content-Length is accepted.",
+                "consumes": [
+                    "application/octet-stream"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tracks"
+                ],
+                "summary": "Upload track audio file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Track ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Raw audio bytes, sent as the request body - not a multipart form",
+                        "name": "audio",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -657,6 +938,24 @@ const docTemplate = `{
                             "type": "file"
                         }
                     },
+                    "206": {
+                        "description": "Partial Content",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -664,6 +963,12 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    },
+                    "416": {
+                        "description": "Plain text, not JSON: written by net/http's own range handling",
+                        "schema": {
+                            "type": "string"
                         }
                     },
                     "500": {
@@ -680,33 +985,36 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "mydal_internal_domain.Album": {
+        "internal_api_handlers.albumResponse": {
             "type": "object",
             "properties": {
-                "artistID": {
+                "artist_id": {
                     "type": "string"
                 },
-                "coverKey": {
+                "cover_key": {
+                    "type": "string"
+                },
+                "created_at": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
-                "releaseYear": {
-                    "type": "integer"
+                "release_date": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
                 }
             }
         },
-        "mydal_internal_domain.Artist": {
+        "internal_api_handlers.artistResponse": {
             "type": "object",
             "properties": {
                 "bio": {
                     "type": "string"
                 },
-                "createdAt": {
+                "created_at": {
                     "type": "string"
                 },
                 "id": {
@@ -717,10 +1025,85 @@ const docTemplate = `{
                 }
             }
         },
-        "mydal_internal_domain.Playlist": {
+        "internal_api_handlers.createAlbumRequest": {
             "type": "object",
             "properties": {
-                "createdAt": {
+                "artist_id": {
+                    "type": "string"
+                },
+                "release_date": {
+                    "description": "ReleaseDate is optional and, being a DATE, carries no time or zone.",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.createArtistRequest": {
+            "type": "object",
+            "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.createPlaylistRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "track_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_handlers.createTrackRequest": {
+            "type": "object",
+            "properties": {
+                "album_id": {
+                    "type": "string"
+                },
+                "artist_id": {
+                    "type": "string"
+                },
+                "bitrate": {
+                    "type": "integer"
+                },
+                "disc_number": {
+                    "type": "integer"
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "file_size": {
+                    "type": "integer"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "track_number": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_handlers.playlistResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
                     "type": "string"
                 },
                 "description": {
@@ -729,85 +1112,60 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "songIDs": {
+                "title": {
+                    "type": "string"
+                },
+                "track_ids": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
-                "title": {
+                "updated_at": {
                     "type": "string"
                 }
             }
         },
-        "mydal_internal_domain.Track": {
+        "internal_api_handlers.trackResponse": {
             "type": "object",
             "properties": {
-                "albumID": {
-                    "description": "AlbumID is empty for a track that belongs to no album.",
+                "album_id": {
                     "type": "string"
                 },
-                "artistID": {
+                "artist_id": {
                     "type": "string"
                 },
                 "bitrate": {
                     "type": "integer"
                 },
-                "createdAt": {
+                "created_at": {
                     "type": "string"
                 },
-                "discNumber": {
+                "disc_number": {
                     "type": "integer"
                 },
-                "duration": {
-                    "$ref": "#/definitions/time.Duration"
+                "duration_ms": {
+                    "type": "integer"
                 },
-                "fileSize": {
-                    "type": "integer",
-                    "format": "int64"
+                "file_size": {
+                    "type": "integer"
                 },
                 "format": {
-                    "description": "\"flac\", \"mp3\", etc.",
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
-                "storageKey": {
-                    "description": "path in S3 or local fs",
+                "storage_key": {
                     "type": "string"
                 },
                 "title": {
                     "type": "string"
                 },
-                "trackNumber": {
+                "track_number": {
                     "type": "integer"
                 }
             }
-        },
-        "time.Duration": {
-            "type": "integer",
-            "format": "int64",
-            "enum": [
-                -9223372036854775808,
-                9223372036854775807,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
-                3600000000000
-            ],
-            "x-enum-varnames": [
-                "minDuration",
-                "maxDuration",
-                "Nanosecond",
-                "Microsecond",
-                "Millisecond",
-                "Second",
-                "Minute",
-                "Hour"
-            ]
         }
     }
 }`

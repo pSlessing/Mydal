@@ -1,11 +1,12 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
-
-	"github.com/lib/pq"
 )
 
 type PlaylistRepository struct {
@@ -17,51 +18,175 @@ func NewPlaylistRepository(db *sql.DB, logger *slog.Logger) *PlaylistRepository 
 	return &PlaylistRepository{db: db, logger: logger}
 }
 
-func (r *PlaylistRepository) GetPlaylistByID(id string) (*domain.Playlist, error) {
+func (r *PlaylistRepository) GetPlaylistByID(ctx context.Context, id string) (*domain.Playlist, error) {
 	var p domain.Playlist
-	err := r.db.QueryRow(
-		"SELECT id, title, description, song_ids, created_at FROM playlists WHERE id = $1", id,
-	).Scan(&p.ID, &p.Title, &p.Description, pq.Array(&p.SongIDs), &p.CreatedAt)
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id, title, description, created_at, updated_at FROM playlists WHERE id = $1", id,
+	).Scan(&p.ID, &p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("playlist %s: %w", id, domain.ErrNotFound)
+	}
 	if err != nil {
 		r.logger.Error("Failed to get playlist by ID", "error", err)
+		return nil, err
+	}
+
+	p.TrackIDs, err = r.trackIDs(ctx, id)
+	if err != nil {
+		r.logger.Error("Failed to get playlist tracks", "error", err)
 		return nil, err
 	}
 	return &p, nil
 }
 
-func (r *PlaylistRepository) CreatePlaylist(p *domain.Playlist) error {
-	return r.db.QueryRow(
-		"INSERT INTO playlists (title, description, song_ids) VALUES ($1, $2, $3) RETURNING id, created_at",
-		p.Title, p.Description, pq.Array(p.SongIDs),
-	).Scan(&p.ID, &p.CreatedAt)
+func (r *PlaylistRepository) CreatePlaylist(ctx context.Context, p *domain.Playlist) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := tx.QueryRowContext(ctx,
+		"INSERT INTO playlists (title, description) VALUES ($1, $2) RETURNING id, created_at, updated_at",
+		p.Title, p.Description,
+	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		r.logger.Error("Failed to create playlist", "error", err)
+		return err
+	}
+
+	for i, trackID := range p.TrackIDs {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES ($1, $2, $3)",
+			p.ID, trackID, i,
+		); err != nil {
+			r.logger.Error("Failed to add track to new playlist", "error", err)
+			return classify(err)
+		}
+	}
+
+	return tx.Commit()
 }
 
-func (r *PlaylistRepository) DeletePlaylist(id string) error {
-	_, err := r.db.Exec("DELETE FROM playlists WHERE id = $1", id)
+func (r *PlaylistRepository) DeletePlaylist(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, "DELETE FROM playlists WHERE id = $1", id)
 	if err != nil {
 		r.logger.Error("Failed to delete playlist", "error", err)
+		return err
 	}
-	return err
-}
-
-func (r *PlaylistRepository) AddTrack(playlistID, trackID string) error {
-	_, err := r.db.Exec(
-		"UPDATE playlists SET song_ids = array_append(song_ids, $1) WHERE id = $2",
-		trackID, playlistID,
-	)
+	rows, err := result.RowsAffected()
 	if err != nil {
-		r.logger.Error("Failed to add track to playlist", "error", err)
+		r.logger.Error("Failed to read rows affected", "error", err)
+		return err
 	}
-	return err
+	if rows == 0 {
+		return fmt.Errorf("playlist %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
 }
 
-func (r *PlaylistRepository) RemoveTrack(playlistID, trackID string) error {
-	_, err := r.db.Exec(
-		"UPDATE playlists SET song_ids = array_remove(song_ids, $1) WHERE id = $2",
-		trackID, playlistID,
-	)
+// AddTrack appends a track to the end of the playlist. It is idempotent: a
+// track already in the playlist keeps the position it has.
+func (r *PlaylistRepository) AddTrack(ctx context.Context, playlistID, trackID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := touchPlaylist(ctx, tx, playlistID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO playlist_tracks (playlist_id, track_id, position)
+		 SELECT $1, $2, COALESCE(MAX(position) + 1, 0) FROM playlist_tracks WHERE playlist_id = $1
+		 ON CONFLICT (playlist_id, track_id) DO NOTHING`,
+		playlistID, trackID,
+	); err != nil {
+		r.logger.Error("Failed to add track to playlist", "error", err)
+		return classify(err)
+	}
+
+	return tx.Commit()
+}
+
+// RemoveTrack drops a track from the playlist and closes the gap it leaves, so
+// positions stay a dense 0..n-1 sequence. The uniqueness constraint on
+// (playlist_id, position) is deferrable, so the renumbering UPDATE is checked
+// once at the end of the statement rather than row by row.
+func (r *PlaylistRepository) RemoveTrack(ctx context.Context, playlistID, trackID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := touchPlaylist(ctx, tx, playlistID); err != nil {
+		return err
+	}
+
+	var position int
+	err = tx.QueryRowContext(ctx,
+		"DELETE FROM playlist_tracks WHERE playlist_id = $1 AND track_id = $2 RETURNING position",
+		playlistID, trackID,
+	).Scan(&position)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("track %s in playlist %s: %w", trackID, playlistID, domain.ErrNotFound)
+	}
 	if err != nil {
 		r.logger.Error("Failed to remove track from playlist", "error", err)
+		return err
 	}
-	return err
+
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE playlist_tracks SET position = position - 1 WHERE playlist_id = $1 AND position > $2",
+		playlistID, position,
+	); err != nil {
+		r.logger.Error("Failed to renumber playlist positions", "error", err)
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// touchPlaylist stamps updated_at and doubles as the existence check every
+// mutation needs: without it an UPDATE against a missing playlist reports
+// success.
+func touchPlaylist(ctx context.Context, tx *sql.Tx, playlistID string) error {
+	result, err := tx.ExecContext(ctx, "UPDATE playlists SET updated_at = now() WHERE id = $1", playlistID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("playlist %s: %w", playlistID, domain.ErrNotFound)
+	}
+	return nil
+}
+
+func (r *PlaylistRepository) trackIDs(ctx context.Context, playlistID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT track_id FROM playlist_tracks WHERE playlist_id = $1 ORDER BY position",
+		playlistID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

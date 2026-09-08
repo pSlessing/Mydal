@@ -45,8 +45,10 @@ func pathUUID(r *http.Request, name string) (string, error) {
 // @Tags         artists
 // @Produce      json
 // @Param        id   path      string  true  "Artist ID"
-// @Success      200  {object}  domain.Artist
+// @Success      200  {object}  artistResponse
+// @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
 // @Router       /artists/{id} [get]
 func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 	id, err := pathUUID(r, "id")
@@ -68,8 +70,8 @@ func (h *ArtistHandler) GetArtist(w http.ResponseWriter, r *http.Request) {
 // @Tags         artists
 // @Accept       json
 // @Produce      json
-// @Param        artist  body      domain.Artist  true  "Artist payload"
-// @Success      201     {object}  domain.Artist
+// @Param        artist  body      createArtistRequest  true  "Artist payload"
+// @Success      201     {object}  artistResponse
 // @Failure      400     {object}  map[string]string
 // @Failure      500     {object}  map[string]string
 // @Router       /artists [post]
@@ -91,8 +93,11 @@ func (h *ArtistHandler) CreateArtist(w http.ResponseWriter, r *http.Request) {
 // @Summary      Delete an artist
 // @Description  Remove an artist from the database by ID
 // @Tags         artists
+// @Produce      json
 // @Param        id   path      string  true  "Artist ID"
 // @Success      204  "No Content"
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /artists/{id} [delete]
 func (h *ArtistHandler) DeleteArtist(w http.ResponseWriter, r *http.Request) {

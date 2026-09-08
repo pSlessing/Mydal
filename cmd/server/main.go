@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"mydal/internal/api"
 	"mydal/internal/api/handlers"
@@ -21,6 +22,7 @@ import (
 	"mydal/internal/service"
 	"mydal/internal/storage"
 	"mydal/migrations"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -42,6 +44,8 @@ const (
 	maxOpenConns    = 25
 	maxIdleConns    = 25
 	connMaxLifetime = 5 * time.Minute
+
+	healthcheckTimeout = 3 * time.Second
 )
 
 func main() {
@@ -53,8 +57,33 @@ func main() {
 	}
 }
 
+// probeReady asks the locally running server whether it is ready. It is the
+// container healthcheck, so it opens no database or bucket connections of its
+// own - it only reports what the running process says about itself.
+func probeReady(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("parse ADDR %q: %w", addr, err)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	client := &http.Client{Timeout: healthcheckTimeout}
+	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/readyz")
+	if err != nil {
+		return fmt.Errorf("probe /readyz: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("not ready: /readyz answered %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func run(bootstrap *slog.Logger) error {
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
+	healthcheck := flag.Bool("healthcheck", false, "probe the local server's /readyz and exit 0 if ready")
 	flag.Parse()
 
 	// In production the variables come from the environment and there is no
@@ -66,6 +95,12 @@ func run(bootstrap *slog.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+
+	// The container image is distroless: no shell, no curl. The binary probes
+	// itself so compose and any orchestrator have a healthcheck to run.
+	if *healthcheck {
+		return probeReady(cfg.Addr)
 	}
 	logger := logging.New(cfg.LogLevel)
 	logger.Info("Starting server...")
@@ -110,20 +145,21 @@ func run(bootstrap *slog.Logger) error {
 	playlistRepo := repository.NewPlaylistRepository(db, logger)
 
 	//init service
-	artistService := service.NewArtistService(artistRepo, logger)
-	trackService := service.NewTrackService(trackRepo, logger)
+	artistService := service.NewArtistService(artistRepo, blobs, logger)
+	trackService := service.NewTrackService(trackRepo, blobs, logger)
 	albumService := service.NewAlbumService(albumRepo, logger)
 	playlistService := service.NewPlaylistService(playlistRepo, logger)
 
 	//init handlers
 	artistHandler := handlers.NewArtistHandler(artistService, logger)
-	trackHandler := handlers.NewTrackHandler(trackService, blobs, logger)
+	trackHandler := handlers.NewTrackHandler(trackService, blobs, cfg.MaxUploadBytes, logger)
 	albumHandler := handlers.NewAlbumHandler(albumService, logger)
 	streamHandler := handlers.NewStreamHandler(trackService, blobs, logger)
 	playlistHandler := handlers.NewPlaylistHandler(playlistService, logger)
+	healthHandler := handlers.NewHealthHandler(db, blobs, logger)
 
 	//init router
-	router := api.NewRouter(artistHandler, trackHandler, albumHandler, streamHandler, playlistHandler, logger)
+	router := api.NewRouter(artistHandler, trackHandler, albumHandler, streamHandler, playlistHandler, healthHandler, logger)
 
 	return serve(ctx, cfg.Addr, router, logger)
 }

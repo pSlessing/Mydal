@@ -6,6 +6,7 @@ type Playlist struct {
 	ID          string
 	Title       string
 	Description string
-	SongIDs     []string
+	TrackIDs    []string
 	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

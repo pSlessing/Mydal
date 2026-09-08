@@ -22,10 +22,11 @@ type Router struct {
 	albumHandler    *handlers.AlbumHandler
 	streamHandler   *handlers.StreamHandler
 	playlistHandler *handlers.PlaylistHandler
+	healthHandler   *handlers.HealthHandler
 	logger          *slog.Logger
 }
 
-func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, playlistHandler *handlers.PlaylistHandler, logger *slog.Logger) *Router {
+func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.TrackHandler, albumHandler *handlers.AlbumHandler, streamHandler *handlers.StreamHandler, playlistHandler *handlers.PlaylistHandler, healthHandler *handlers.HealthHandler, logger *slog.Logger) *Router {
 	r := &Router{
 		mux:             http.NewServeMux(),
 		artistHandler:   artistHandler,
@@ -33,6 +34,7 @@ func NewRouter(artistHandler *handlers.ArtistHandler, trackHandler *handlers.Tra
 		albumHandler:    albumHandler,
 		streamHandler:   streamHandler,
 		playlistHandler: playlistHandler,
+		healthHandler:   healthHandler,
 		logger:          logger,
 	}
 	r.registerRoutes()
@@ -70,6 +72,11 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("DELETE "+APIPrefix+"/playlists/{id}", r.playlistHandler.DeletePlaylist)
 	r.mux.HandleFunc("PUT "+APIPrefix+"/playlists/{id}/tracks/{trackId}", r.playlistHandler.AddTrackToPlaylist)
 	r.mux.HandleFunc("DELETE "+APIPrefix+"/playlists/{id}/tracks/{trackId}", r.playlistHandler.RemoveTrackFromPlaylist)
+
+	// Probes sit outside the versioned API: an orchestrator's healthcheck
+	// should not have to be rewritten when the API version moves.
+	r.mux.HandleFunc("GET /healthz", r.healthHandler.Healthz)
+	r.mux.HandleFunc("GET /readyz", r.healthHandler.Readyz)
 
 	// The docs UI is not part of the versioned API surface.
 	r.mux.Handle("GET /swagger/", httpSwagger.Handler())

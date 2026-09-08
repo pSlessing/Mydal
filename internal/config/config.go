@@ -5,8 +5,14 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 )
+
+// defaultMaxUploadBytes is a generous ceiling for a single audio file - a long
+// lossless album side fits well inside it - while still bounding what one
+// request can write.
+const defaultMaxUploadBytes int64 = 1 << 30 // 1 GiB
 
 type Config struct {
 	Addr           string
@@ -18,6 +24,7 @@ type Config struct {
 	BucketName     string
 	LogLevel       string
 	Mode           string
+	MaxUploadBytes int64
 }
 
 // LogValue redacts the credentials so logging the whole config stays safe.
@@ -32,6 +39,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("BucketName", c.BucketName),
 		slog.String("LogLevel", c.LogLevel),
 		slog.String("Mode", c.Mode),
+		slog.Int64("MaxUploadBytes", c.MaxUploadBytes),
 	)
 }
 
@@ -62,6 +70,15 @@ func Load() (Config, error) {
 		BucketName:     os.Getenv("BUCKET_NAME"),
 		LogLevel:       os.Getenv("LOG_LEVEL"),
 		Mode:           os.Getenv("MODE"),
+	}
+
+	cfg.MaxUploadBytes = defaultMaxUploadBytes
+	if raw := os.Getenv("MAX_UPLOAD_BYTES"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			return Config{}, fmt.Errorf("MAX_UPLOAD_BYTES must be a positive integer, got %q", raw)
+		}
+		cfg.MaxUploadBytes = parsed
 	}
 
 	var missing []string

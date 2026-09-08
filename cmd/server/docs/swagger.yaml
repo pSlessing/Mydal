@@ -1,96 +1,125 @@
 basePath: /api/v1
 definitions:
-  mydal_internal_domain.Album:
+  internal_api_handlers.albumResponse:
     properties:
-      artistID:
+      artist_id:
         type: string
-      coverKey:
+      cover_key:
+        type: string
+      created_at:
         type: string
       id:
         type: string
-      releaseYear:
-        type: integer
+      release_date:
+        type: string
       title:
         type: string
     type: object
-  mydal_internal_domain.Artist:
+  internal_api_handlers.artistResponse:
     properties:
       bio:
         type: string
-      createdAt:
+      created_at:
         type: string
       id:
         type: string
       name:
         type: string
     type: object
-  mydal_internal_domain.Playlist:
+  internal_api_handlers.createAlbumRequest:
     properties:
-      createdAt:
+      artist_id:
+        type: string
+      release_date:
+        description: ReleaseDate is optional and, being a DATE, carries no time or
+          zone.
+        type: string
+      title:
+        type: string
+    type: object
+  internal_api_handlers.createArtistRequest:
+    properties:
+      bio:
+        type: string
+      name:
+        type: string
+    type: object
+  internal_api_handlers.createPlaylistRequest:
+    properties:
+      description:
+        type: string
+      title:
+        type: string
+      track_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_handlers.createTrackRequest:
+    properties:
+      album_id:
+        type: string
+      artist_id:
+        type: string
+      bitrate:
+        type: integer
+      disc_number:
+        type: integer
+      duration_ms:
+        type: integer
+      file_size:
+        type: integer
+      format:
+        type: string
+      title:
+        type: string
+      track_number:
+        type: integer
+    type: object
+  internal_api_handlers.playlistResponse:
+    properties:
+      created_at:
         type: string
       description:
         type: string
       id:
         type: string
-      songIDs:
+      title:
+        type: string
+      track_ids:
         items:
           type: string
         type: array
-      title:
+      updated_at:
         type: string
     type: object
-  mydal_internal_domain.Track:
+  internal_api_handlers.trackResponse:
     properties:
-      albumID:
-        description: AlbumID is empty for a track that belongs to no album.
+      album_id:
         type: string
-      artistID:
+      artist_id:
         type: string
       bitrate:
         type: integer
-      createdAt:
+      created_at:
         type: string
-      discNumber:
+      disc_number:
         type: integer
-      duration:
-        $ref: '#/definitions/time.Duration'
-      fileSize:
-        format: int64
+      duration_ms:
+        type: integer
+      file_size:
         type: integer
       format:
-        description: '"flac", "mp3", etc.'
         type: string
       id:
         type: string
-      storageKey:
-        description: path in S3 or local fs
+      storage_key:
         type: string
       title:
         type: string
-      trackNumber:
+      track_number:
         type: integer
     type: object
-  time.Duration:
-    enum:
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    format: int64
-    type: integer
-    x-enum-varnames:
-    - minDuration
-    - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
 host: localhost:8080
 info:
   contact: {}
@@ -109,14 +138,14 @@ paths:
         name: album
         required: true
         schema:
-          $ref: '#/definitions/mydal_internal_domain.Album'
+          $ref: '#/definitions/internal_api_handlers.createAlbumRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Album'
+            $ref: '#/definitions/internal_api_handlers.albumResponse'
         "400":
           description: Bad Request
           schema:
@@ -141,9 +170,23 @@ paths:
         name: id
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -167,9 +210,21 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Album'
+            $ref: '#/definitions/internal_api_handlers.albumResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
           schema:
             additionalProperties:
               type: string
@@ -188,14 +243,14 @@ paths:
         name: artist
         required: true
         schema:
-          $ref: '#/definitions/mydal_internal_domain.Artist'
+          $ref: '#/definitions/internal_api_handlers.createArtistRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Artist'
+            $ref: '#/definitions/internal_api_handlers.artistResponse'
         "400":
           description: Bad Request
           schema:
@@ -220,9 +275,23 @@ paths:
         name: id
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -246,9 +315,21 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Artist'
+            $ref: '#/definitions/internal_api_handlers.artistResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
           schema:
             additionalProperties:
               type: string
@@ -256,6 +337,22 @@ paths:
       summary: Get artist by ID
       tags:
       - artists
+  /healthz:
+    get:
+      description: Reports that the process is running. Dependencies are deliberately
+        not checked - restarting the server does not fix a database outage.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness probe
+      tags:
+      - health
   /playlists:
     post:
       consumes:
@@ -267,16 +364,22 @@ paths:
         name: playlist
         required: true
         schema:
-          $ref: '#/definitions/mydal_internal_domain.Playlist'
+          $ref: '#/definitions/internal_api_handlers.createPlaylistRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Playlist'
+            $ref: '#/definitions/internal_api_handlers.playlistResponse'
         "400":
           description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
           schema:
             additionalProperties:
               type: string
@@ -299,9 +402,23 @@ paths:
         name: id
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -325,9 +442,21 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Playlist'
+            $ref: '#/definitions/internal_api_handlers.playlistResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
           schema:
             additionalProperties:
               type: string
@@ -349,9 +478,23 @@ paths:
         name: trackId
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -374,9 +517,23 @@ paths:
         name: trackId
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -386,6 +543,26 @@ paths:
       summary: Add track to playlist
       tags:
       - playlists
+  /readyz:
+    get:
+      description: Checks the database and the blob store. Answers 503 with a per-dependency
+        breakdown when either is unreachable.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Readiness probe
+      tags:
+      - health
   /tracks:
     post:
       consumes:
@@ -397,14 +574,14 @@ paths:
         name: track
         required: true
         schema:
-          $ref: '#/definitions/mydal_internal_domain.Track'
+          $ref: '#/definitions/internal_api_handlers.createTrackRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Track'
+            $ref: '#/definitions/internal_api_handlers.trackResponse'
         "400":
           description: Bad Request
           schema:
@@ -429,9 +606,23 @@ paths:
         name: id
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
@@ -455,9 +646,21 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/mydal_internal_domain.Track'
+            $ref: '#/definitions/internal_api_handlers.trackResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
           schema:
             additionalProperties:
               type: string
@@ -469,19 +672,23 @@ paths:
     put:
       consumes:
       - application/octet-stream
-      description: Upload the audio binary for an existing track. Content-Type must
-        be an audio MIME type.
+      description: Upload the audio binary for an existing track. The format is detected
+        from the file's own bytes; the Content-Type header is ignored. A chunked body
+        without Content-Length is accepted.
       parameters:
       - description: Track ID
         in: path
         name: id
         required: true
         type: string
-      - description: Audio file binary
-        in: formData
-        name: file
+      - description: Raw audio bytes, sent as the request body - not a multipart form
+        in: body
+        name: audio
         required: true
-        type: file
+        schema:
+          type: string
+      produces:
+      - application/json
       responses:
         "204":
           description: No Content
@@ -493,6 +700,18 @@ paths:
             type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
           schema:
             additionalProperties:
               type: string
@@ -522,12 +741,28 @@ paths:
           description: OK
           schema:
             type: file
+        "206":
+          description: Partial Content
+          schema:
+            type: file
+        "304":
+          description: Not Modified
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+        "416":
+          description: 'Plain text, not JSON: written by net/http''s own range handling'
+          schema:
+            type: string
         "500":
           description: Internal Server Error
           schema:

@@ -29,6 +29,9 @@ type BlobStore interface {
 	// Stat returns an object's metadata.
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	Delete(ctx context.Context, key string) error
+	// Ping reports whether the store is reachable and the bucket usable. It
+	// backs the readiness probe, so it must be cheap.
+	Ping(ctx context.Context) error
 	// PresignedGetURL mints a temporary direct download URL.
 	PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error)
 }

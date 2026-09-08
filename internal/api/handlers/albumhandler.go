@@ -1,20 +1,29 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
 	"mydal/internal/httpx"
-	"mydal/internal/service"
 	"net/http"
 )
 
+// AlbumService is the behaviour the album handler needs, declared here so the
+// handler can be tested against a fake.
+type AlbumService interface {
+	GetAlbumByID(ctx context.Context, id string) (*domain.Album, error)
+	CreateAlbum(ctx context.Context, album *domain.Album) error
+	DeleteAlbum(ctx context.Context, id string) error
+}
+
 type AlbumHandler struct {
-	service *service.AlbumService
+	service AlbumService
 	logger  *slog.Logger
 }
 
-func NewAlbumHandler(service *service.AlbumService, logger *slog.Logger) *AlbumHandler {
+func NewAlbumHandler(service AlbumService, logger *slog.Logger) *AlbumHandler {
 	return &AlbumHandler{service: service, logger: logger}
 }
 
@@ -24,18 +33,23 @@ func NewAlbumHandler(service *service.AlbumService, logger *slog.Logger) *AlbumH
 // @Tags         albums
 // @Produce      json
 // @Param        id   path      string  true  "Album ID"
-// @Success      200  {object}  domain.Album
+// @Success      200  {object}  albumResponse
+// @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
 // @Router       /albums/{id} [get]
 func (h *AlbumHandler) GetAlbum(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	album, err := h.service.GetAlbumByID(id)
+	id, err := pathUUID(r, "id")
 	if err != nil {
-		h.logger.Error("Failed to get album", "error", err)
-		http.Error(w, "Album not found", http.StatusNotFound)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	httpx.RespondWithJSON(w, http.StatusOK, album)
+	album, err := h.service.GetAlbumByID(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	httpx.RespondWithJSON(w, http.StatusOK, newAlbumResponse(album))
 }
 
 // CreateAlbum creates a new album
@@ -44,39 +58,48 @@ func (h *AlbumHandler) GetAlbum(w http.ResponseWriter, r *http.Request) {
 // @Tags         albums
 // @Accept       json
 // @Produce      json
-// @Param        album  body      domain.Album  true  "Album payload"
-// @Success      201    {object}  domain.Album
+// @Param        album  body      createAlbumRequest  true  "Album payload"
+// @Success      201    {object}  albumResponse
 // @Failure      400    {object}  map[string]string
 // @Failure      500    {object}  map[string]string
 // @Router       /albums [post]
 func (h *AlbumHandler) CreateAlbum(w http.ResponseWriter, r *http.Request) {
-	var album domain.Album
-	if err := json.NewDecoder(r.Body).Decode(&album); err != nil {
-		h.logger.Error("Failed to decode album", "error", err)
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	var req createAlbumRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
 		return
 	}
-	if err := h.service.CreateAlbum(&album); err != nil {
-		h.logger.Error("Failed to create album", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	album, err := req.toDomain()
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	httpx.RespondWithJSON(w, http.StatusCreated, album)
+	if err := h.service.CreateAlbum(r.Context(), &album); err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	httpx.RespondWithJSON(w, http.StatusCreated, newAlbumResponse(&album))
 }
 
 // DeleteAlbum deletes an album
 // @Summary      Delete an album
 // @Description  Remove an album from the database by ID
 // @Tags         albums
+// @Produce      json
 // @Param        id   path      string  true  "Album ID"
 // @Success      204  "No Content"
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /albums/{id} [delete]
 func (h *AlbumHandler) DeleteAlbum(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := h.service.DeleteAlbum(id); err != nil {
-		h.logger.Error("Failed to delete album", "error", err)
-		http.Error(w, "Failed to delete album", http.StatusInternalServerError)
+	id, err := pathUUID(r, "id")
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	if err := h.service.DeleteAlbum(r.Context(), id); err != nil {
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

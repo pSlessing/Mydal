@@ -1,20 +1,31 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"mydal/internal/domain"
 	"mydal/internal/httpx"
-	"mydal/internal/service"
 	"net/http"
 )
 
+// PlaylistService is the behaviour the playlist handler needs, declared here
+// so the handler can be tested against a fake.
+type PlaylistService interface {
+	GetPlaylistByID(ctx context.Context, id string) (*domain.Playlist, error)
+	CreatePlaylist(ctx context.Context, p *domain.Playlist) error
+	DeletePlaylist(ctx context.Context, id string) error
+	AddTrack(ctx context.Context, playlistID, trackID string) error
+	RemoveTrack(ctx context.Context, playlistID, trackID string) error
+}
+
 type PlaylistHandler struct {
-	service *service.PlaylistService
+	service PlaylistService
 	logger  *slog.Logger
 }
 
-func NewPlaylistHandler(service *service.PlaylistService, logger *slog.Logger) *PlaylistHandler {
+func NewPlaylistHandler(service PlaylistService, logger *slog.Logger) *PlaylistHandler {
 	return &PlaylistHandler{service: service, logger: logger}
 }
 
@@ -24,18 +35,23 @@ func NewPlaylistHandler(service *service.PlaylistService, logger *slog.Logger) *
 // @Tags         playlists
 // @Produce      json
 // @Param        id   path      string  true  "Playlist ID"
-// @Success      200  {object}  domain.Playlist
+// @Success      200  {object}  playlistResponse
+// @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
 // @Router       /playlists/{id} [get]
 func (h *PlaylistHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	playlist, err := h.service.GetPlaylistByID(id)
+	id, err := pathUUID(r, "id")
 	if err != nil {
-		h.logger.Error("Failed to get playlist", "error", err)
-		http.Error(w, "Playlist not found", http.StatusNotFound)
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	httpx.RespondWithJSON(w, http.StatusOK, playlist)
+	playlist, err := h.service.GetPlaylistByID(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	httpx.RespondWithJSON(w, http.StatusOK, newPlaylistResponse(playlist))
 }
 
 // CreatePlaylist creates a new playlist
@@ -44,39 +60,45 @@ func (h *PlaylistHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 // @Tags         playlists
 // @Accept       json
 // @Produce      json
-// @Param        playlist  body      domain.Playlist  true  "Playlist payload"
-// @Success      201       {object}  domain.Playlist
+// @Param        playlist  body      createPlaylistRequest  true  "Playlist payload"
+// @Success      201       {object}  playlistResponse
 // @Failure      400       {object}  map[string]string
+// @Failure      409       {object}  map[string]string
 // @Failure      500       {object}  map[string]string
 // @Router       /playlists [post]
 func (h *PlaylistHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request) {
-	var playlist domain.Playlist
-	if err := json.NewDecoder(r.Body).Decode(&playlist); err != nil {
-		h.logger.Error("Failed to decode playlist", "error", err)
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	var req createPlaylistRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, h.logger, fmt.Errorf("%w: malformed JSON body", domain.ErrInvalidInput))
 		return
 	}
-	if err := h.service.CreatePlaylist(&playlist); err != nil {
-		h.logger.Error("Failed to create playlist", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	playlist := req.toDomain()
+	if err := h.service.CreatePlaylist(r.Context(), &playlist); err != nil {
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
-	httpx.RespondWithJSON(w, http.StatusCreated, playlist)
+	httpx.RespondWithJSON(w, http.StatusCreated, newPlaylistResponse(&playlist))
 }
 
 // DeletePlaylist deletes a playlist
 // @Summary      Delete a playlist
 // @Description  Remove a playlist from the database by ID
 // @Tags         playlists
+// @Produce      json
 // @Param        id   path      string  true  "Playlist ID"
 // @Success      204  "No Content"
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /playlists/{id} [delete]
 func (h *PlaylistHandler) DeletePlaylist(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := h.service.DeletePlaylist(id); err != nil {
-		h.logger.Error("Failed to delete playlist", "error", err)
-		http.Error(w, "Failed to delete playlist", http.StatusInternalServerError)
+	id, err := pathUUID(r, "id")
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	if err := h.service.DeletePlaylist(r.Context(), id); err != nil {
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -86,17 +108,27 @@ func (h *PlaylistHandler) DeletePlaylist(w http.ResponseWriter, r *http.Request)
 // @Summary      Add track to playlist
 // @Description  Add an existing track to an existing playlist
 // @Tags         playlists
+// @Produce      json
 // @Param        id        path  string  true  "Playlist ID"
 // @Param        trackId   path  string  true  "Track ID"
 // @Success      204  "No Content"
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /playlists/{id}/tracks/{trackId} [put]
 func (h *PlaylistHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Request) {
-	playlistID := r.PathValue("id")
-	trackID := r.PathValue("trackId")
-	if err := h.service.AddTrack(playlistID, trackID); err != nil {
-		h.logger.Error("Failed to add track to playlist", "error", err)
-		http.Error(w, "Failed to add track", http.StatusInternalServerError)
+	playlistID, err := pathUUID(r, "id")
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	trackID, err := pathUUID(r, "trackId")
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	if err := h.service.AddTrack(r.Context(), playlistID, trackID); err != nil {
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -106,17 +138,27 @@ func (h *PlaylistHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 // @Summary      Remove track from playlist
 // @Description  Remove a track from an existing playlist
 // @Tags         playlists
+// @Produce      json
 // @Param        id        path  string  true  "Playlist ID"
 // @Param        trackId   path  string  true  "Track ID"
 // @Success      204  "No Content"
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /playlists/{id}/tracks/{trackId} [delete]
 func (h *PlaylistHandler) RemoveTrackFromPlaylist(w http.ResponseWriter, r *http.Request) {
-	playlistID := r.PathValue("id")
-	trackID := r.PathValue("trackId")
-	if err := h.service.RemoveTrack(playlistID, trackID); err != nil {
-		h.logger.Error("Failed to remove track from playlist", "error", err)
-		http.Error(w, "Failed to remove track", http.StatusInternalServerError)
+	playlistID, err := pathUUID(r, "id")
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	trackID, err := pathUUID(r, "trackId")
+	if err != nil {
+		httpx.WriteError(w, h.logger, err)
+		return
+	}
+	if err := h.service.RemoveTrack(r.Context(), playlistID, trackID); err != nil {
+		httpx.WriteError(w, h.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

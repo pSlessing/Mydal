@@ -23,9 +23,20 @@ migrate:
 swagger:
 	swag init --generalInfo cmd/server/main.go --output cmd/server/docs --parseDependency --parseInternal
 
-## test: run the test suite with the race detector
+## test: run the whole suite with the race detector
+##       Integration tests need Postgres and MinIO; they skip when
+##       TEST_DATABASE_URL / TEST_MINIO_ENDPOINT (or DATABASE_URL /
+##       MINIO_ENDPOINT) are unset.
 test:
 	go test -race $(PKGS)
+
+## test-unit: run only the tests that need no services
+test-unit:
+	go test -race -short $(PKGS)
+
+## test-cover: run the suite and report coverage per package
+test-cover:
+	go test -race -cover $(PKGS)
 
 ## vet: run go vet
 vet:
@@ -63,4 +74,4 @@ logs:
 clean:
 	rm -rf bin
 
-.PHONY: help run build migrate swagger test vet lint fmt tidy up down down-clean logs clean
+.PHONY: help run build migrate swagger test test-unit test-cover vet lint fmt tidy up down down-clean logs clean

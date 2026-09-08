@@ -35,25 +35,61 @@ func (r *ArtistRepository) GetArtistByID(ctx context.Context, id string) (*domai
 }
 
 func (r *ArtistRepository) CreateArtist(ctx context.Context, artist *domain.Artist) error {
-	return r.db.QueryRowContext(ctx,
+	return classify(r.db.QueryRowContext(ctx,
 		"INSERT INTO artists (name, bio) VALUES ($1, $2) RETURNING id, created_at",
 		artist.Name, artist.Bio,
-	).Scan(&artist.ID, &artist.CreatedAt)
+	).Scan(&artist.ID, &artist.CreatedAt))
 }
 
-func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, "DELETE FROM artists WHERE id = $1", id)
+// DeleteArtist removes the artist and returns the storage keys of every track
+// that went with them. tracks.artist_id is ON DELETE CASCADE, so those rows
+// vanish with the artist and nothing afterwards records which objects they
+// pointed at - the keys have to be collected inside the transaction, before
+// the cascade fires.
+func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) ([]string, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx,
+		"SELECT storage_key FROM tracks WHERE artist_id = $1 AND storage_key <> ''", id)
+	if err != nil {
+		r.logger.Error("Failed to collect artist storage keys", "error", err)
+		return nil, err
+	}
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result, err := tx.ExecContext(ctx, "DELETE FROM artists WHERE id = $1", id)
 	if err != nil {
 		r.logger.Error("Failed to delete artist", "error", err)
-		return err
+		return nil, err
 	}
-	rows, err := result.RowsAffected()
+	affected, err := result.RowsAffected()
 	if err != nil {
 		r.logger.Error("Failed to read rows affected", "error", err)
-		return err
+		return nil, err
 	}
-	if rows == 0 {
-		return fmt.Errorf("artist %s: %w", id, domain.ErrNotFound)
+	if affected == 0 {
+		return nil, fmt.Errorf("artist %s: %w", id, domain.ErrNotFound)
 	}
-	return nil
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

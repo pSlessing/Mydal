@@ -87,6 +87,19 @@ func (s *MinIOStore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// Ping checks the bucket exists, which proves both that MinIO answers and
+// that the credentials work.
+func (s *MinIOStore) Ping(ctx context.Context) error {
+	ok, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return fmt.Errorf("reach bucket %q: %w", s.bucket, err)
+	}
+	if !ok {
+		return fmt.Errorf("bucket %q does not exist", s.bucket)
+	}
+	return nil
+}
+
 func (s *MinIOStore) PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	u, err := s.client.PresignedGetObject(ctx, s.bucket, key, expiry, url.Values{})
 	if err != nil {

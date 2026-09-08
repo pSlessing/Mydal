@@ -56,6 +56,14 @@ services:
       BUCKET_NAME: mydal
       LOG_LEVEL: info
     ports: ["${APP_PORT:-8080}:8080"]
+    healthcheck:
+      # The distroless image has no shell and no curl, so the binary answers
+      # its own probe.
+      test: ["CMD", "/mydal", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
 
 # Named, so data survives `docker compose down`.
