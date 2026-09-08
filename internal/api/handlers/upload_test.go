@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/minio/minio-go/v7"
 
 	"mydal/internal/domain"
 	"mydal/internal/repository"
@@ -24,6 +27,8 @@ func flacBody(payload string) []byte { return append([]byte("fLaC"), payload...)
 type uploadFixture struct {
 	handler   *TrackHandler
 	blobs     storage.BlobStore
+	client    *minio.Client
+	bucket    string
 	trackRepo *repository.TrackRepository
 	artistID  string
 	ctx       context.Context
@@ -32,7 +37,7 @@ type uploadFixture struct {
 func newUploadFixture(t *testing.T) uploadFixture {
 	t.Helper()
 	db := testutil.DB(t)
-	blobs := testutil.Blobs(t)
+	blobs, client, bucket := testutil.BlobsWithClient(t)
 	quiet := testutil.Quiet()
 	ctx := context.Background()
 
@@ -44,10 +49,19 @@ func newUploadFixture(t *testing.T) uploadFixture {
 	return uploadFixture{
 		handler:   NewTrackHandler(service.NewTrackService(trackRepo, blobs, quiet), blobs, testUploadCap, quiet),
 		blobs:     blobs,
+		client:    client,
+		bucket:    bucket,
 		trackRepo: trackRepo,
 		artistID:  artist.ID,
 		ctx:       ctx,
 	}
+}
+
+// keys lists every object currently in the fixture's bucket, for assertions
+// about orphans that can't be checked by guessing a key.
+func (f uploadFixture) keys(t *testing.T) []string {
+	t.Helper()
+	return testutil.Keys(t, f.client, f.bucket)
 }
 
 func (f uploadFixture) newTrack(t *testing.T) string {
@@ -94,8 +108,8 @@ func TestUploadAcceptsChunkedBodies(t *testing.T) {
 		t.Fatalf("chunked upload = %d, want 204: %s", rec.Code, rec.Body)
 	}
 	tr := f.stored(t, id)
-	if tr.StorageKey != "tracks/"+id+".flac" {
-		t.Fatalf("key = %q", tr.StorageKey)
+	if !strings.HasPrefix(tr.StorageKey, "tracks/"+id+"/") || !strings.HasSuffix(tr.StorageKey, ".flac") {
+		t.Fatalf("key = %q, want tracks/%s/<random>.flac", tr.StorageKey, id)
 	}
 	sum := sha256.Sum256(body)
 	if tr.ContentHash != hex.EncodeToString(sum[:]) {
@@ -112,10 +126,11 @@ func TestUploadIgnoresTheClientContentType(t *testing.T) {
 	if rec := f.upload(id, "audio/mpeg", flacBody("really-flac"), false); rec.Code != http.StatusNoContent {
 		t.Fatalf("upload = %d: %s", rec.Code, rec.Body)
 	}
-	if got := f.stored(t, id).StorageKey; got != "tracks/"+id+".flac" {
-		t.Fatalf("the header beat the sniffer: %q", got)
+	key := f.stored(t, id).StorageKey
+	if !strings.HasSuffix(key, ".flac") {
+		t.Fatalf("the header beat the sniffer: %q", key)
 	}
-	info, err := f.blobs.Stat(f.ctx, "tracks/"+id+".flac")
+	info, err := f.blobs.Stat(f.ctx, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,23 +188,79 @@ func TestReuploadDoesNotOrphanThePreviousObject(t *testing.T) {
 	if rec := f.upload(id, "", append([]byte("ID3\x04\x00"), "mp3-audio"...), false); rec.Code != http.StatusNoContent {
 		t.Fatalf("first upload = %d: %s", rec.Code, rec.Body)
 	}
+	mp3Key := f.stored(t, id).StorageKey
+
 	if rec := f.upload(id, "", flacBody("flac-audio"), false); rec.Code != http.StatusNoContent {
 		t.Fatalf("re-upload = %d: %s", rec.Code, rec.Body)
 	}
-	if !objectPresent(t, f.blobs, "tracks/"+id+".flac") {
+	flacKey := f.stored(t, id).StorageKey
+	if !objectPresent(t, f.blobs, flacKey) {
 		t.Fatal("the re-upload did not store the new object")
 	}
-	if objectPresent(t, f.blobs, "tracks/"+id+".mp3") {
+	if objectPresent(t, f.blobs, mp3Key) {
 		t.Fatal("the replaced object was orphaned")
 	}
 
-	// A same-format re-upload overwrites in place and must not delete what it
-	// just wrote.
+	// A same-format re-upload used to overwrite the object in place (same id,
+	// same extension -> same key) and then delete it if the write failed. It
+	// must now land under a fresh key instead.
 	if rec := f.upload(id, "", flacBody("flac-audio-2"), false); rec.Code != http.StatusNoContent {
 		t.Fatalf("same-format re-upload = %d: %s", rec.Code, rec.Body)
 	}
-	if !objectPresent(t, f.blobs, "tracks/"+id+".flac") {
-		t.Fatal("a same-format re-upload deleted the object it had written")
+	flacKey2 := f.stored(t, id).StorageKey
+	if flacKey2 == flacKey {
+		t.Fatal("a same-format re-upload reused the previous object's key")
+	}
+	if !objectPresent(t, f.blobs, flacKey2) {
+		t.Fatal("a same-format re-upload did not store the new object")
+	}
+	if objectPresent(t, f.blobs, flacKey) {
+		t.Fatal("a same-format re-upload orphaned the previous object")
+	}
+}
+
+// This is the exact sequence B1 described: track A holds a FLAC, track B
+// holds a different FLAC, and B's bytes are uploaded onto A. Because A and B
+// share a format, the old code wrote both to the same key, so MinIO already
+// held B's bytes under A's name by the time the content-hash dedup index
+// rejected the write - and the handler's cleanup then deleted that key as
+// "nothing points at it", taking A's live audio with it.
+func TestSameFormatReuploadSurvivesADedupConflict(t *testing.T) {
+	f := newUploadFixture(t)
+	a, b := f.newTrack(t), f.newTrack(t)
+	audioA := flacBody("audio-a")
+	audioB := flacBody("audio-b")
+
+	if rec := f.upload(a, "", audioA, false); rec.Code != http.StatusNoContent {
+		t.Fatalf("upload to a = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := f.upload(b, "", audioB, false); rec.Code != http.StatusNoContent {
+		t.Fatalf("upload to b = %d: %s", rec.Code, rec.Body)
+	}
+	keyA := f.stored(t, a).StorageKey
+
+	rec := f.upload(a, "", audioB, false)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("dedup conflict = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	if got := f.stored(t, a).StorageKey; got != keyA {
+		t.Fatalf("track a's recorded key changed to %q after the failed re-upload", got)
+	}
+	if !objectPresent(t, f.blobs, keyA) {
+		t.Fatal("the failed re-upload deleted track a's live audio")
+	}
+
+	body, err := f.blobs.Get(f.ctx, keyA)
+	if err != nil {
+		t.Fatalf("track a's object is gone: %v", err)
+	}
+	defer body.Close()
+	got, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, audioA) {
+		t.Fatal("track a's audio was overwritten by the failed re-upload")
 	}
 }
 
@@ -207,8 +278,11 @@ func TestDuplicateAudioIsRejectedAndLeavesNoOrphan(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("duplicate audio = %d, want 409: %s", rec.Code, rec.Body)
 	}
-	if objectPresent(t, f.blobs, "tracks/"+second+".flac") {
-		t.Fatal("the rejected duplicate left its object behind")
+	// The rejected copy's key is random and never recorded anywhere on
+	// failure, so its absence is checked by listing the whole bucket rather
+	// than guessing the key.
+	if keys := f.keys(t); len(keys) != 1 {
+		t.Fatalf("bucket contents = %v, want exactly the first upload's object", keys)
 	}
 	if f.stored(t, first).StorageKey == "" {
 		t.Fatal("the original upload was disturbed")

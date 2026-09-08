@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -149,7 +150,16 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 	hasher := sha256.New()
 	content := io.TeeReader(io.MultiReader(bytes.NewReader(head), body), hasher)
 
-	storageKey := fmt.Sprintf("tracks/%s%s", id, format.ext)
+	// The key carries a random component so a re-upload can never collide with
+	// the object the track currently points at, even when the format (and so
+	// the extension) is unchanged. Overwriting that object in place is what let
+	// a failed SetTrackFile below delete the track's live audio.
+	suffix := make([]byte, 16)
+	if _, err := rand.Read(suffix); err != nil {
+		httpx.WriteError(w, h.logger, fmt.Errorf("generate storage key for track %s: %w", id, err))
+		return
+	}
+	storageKey := fmt.Sprintf("tracks/%s/%s%s", id, hex.EncodeToString(suffix), format.ext)
 	// A negative length means "unknown": the BlobStore streams it, which is
 	// what makes a chunked upload work.
 	size := r.ContentLength
@@ -182,8 +192,10 @@ func (h *TrackHandler) UploadTrackFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A re-upload in a different format lands under a different extension, so
-	// the object the track used to point at is now unreferenced.
+	// A re-upload always lands under a fresh key (see storageKey above), so a
+	// track that already had a file leaves its old object unreferenced now
+	// that the row has moved on. The row committed first, so this can only
+	// orphan an object, never detach one still referenced.
 	if previousKey != "" && previousKey != storageKey {
 		if err := h.blobs.Delete(cleanup, previousKey); err != nil {
 			h.logger.Error("Orphaned object: replaced track file could not be removed",
