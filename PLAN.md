@@ -1,339 +1,366 @@
 # Mydal development plan
 
 Mydal is a Go backend for a self-hosted music library: Postgres holds the
-catalogue, MinIO (S3-compatible) holds the audio files, and an HTTP API exposes
-both. The foundations are sound — embedded migrations applied at startup,
-validated config, graceful shutdown, request id / logging / recovery
-middleware, a `BlobStore` seam, a distroless image, compose and CI. What sits
-on top of them is uneven: the artist path was rebuilt to a contract the other
-three resources never caught up with, and in two places the code and the schema
-disagree outright.
+catalogue, MinIO (S3-compatible) holds the audio, and a versioned HTTP API
+under `/api/v1` exposes both. This plan replaces the earlier one committed as
+`PLAN.md`: every defect it listed (D1 to D12) has been fixed and is now pinned
+by a test, and only D13 (no authentication) remains. What follows is a fresh
+audit of the code as it stands on 2026-09-08.
 
-This plan is therefore **defect-driven**. Part 1 is the list of everything
-found wrong, Part 2 sequences the fixes, Part 3 keeps the forward roadmap that
-resumes once the defects are gone.
-
-Each item names the files it touches so it can be picked up independently.
+The audit was done by reading every source file, running `go build`, `go vet`,
+`go test -short` (all green), `golangci-lint run` (11 findings, see B5), and
+regenerating the OpenAPI spec into a scratch directory (no drift from the
+committed one). The integration tests were **not** run here: they need a
+Postgres and a MinIO, and neither was up on this machine. CI runs them.
 
 ---
 
-## Current state (September 2026)
+## Part 0 — How it works
 
-- Layered layout `handlers -> service -> repository -> domain`, wired by hand
-  in `cmd/server/main.go`. `go build ./...` and `go vet ./...` are clean.
-- 16 routes under `/api/v1`, plus Swagger UI at `/swagger/`.
-- Five tables across four reversible migrations, embedded and applied at
-  startup (`-migrate-only` applies and exits).
-- Three tiers of code quality, which is the root of most of Part 1:
+```
+cmd/server/main.go        flags, .env, config, DB pool, migrations, MinIO client,
+                          bucket creation, hand-wired DI, HTTP server, shutdown
+internal/api/router.go    stdlib ServeMux (Go 1.22 method patterns), Swagger UI
+internal/api/middleware.go  RequestID -> Logging -> Recover, outside the mux
+internal/api/handlers     one handler per resource, DTOs, audio sniffer, probes
+internal/service          validation and orchestration (DB row + blob object)
+internal/repository       database/sql over pgx, SQLSTATE -> domain sentinel
+internal/domain           entities and ErrNotFound / ErrInvalidInput / ErrConflict
+internal/storage          BlobStore interface and the MinIO implementation
+internal/httpx            error -> status mapping, JSON writers
+internal/testutil         per-test Postgres schema and per-test MinIO bucket
+migrations                five embedded SQL migrations, applied at startup
+```
 
-  | Tier | Resource | Traits |
-  |---|---|---|
-  | Current | artists | `ctx` threaded, consumer-side interface, DTOs, UUID validation, typed errors mapped to 400/404/409/500 |
-  | Half-converted | tracks | `ctx` and interface present; decodes into the domain struct, plain-text errors, one method still without `ctx` |
-  | Pre-refactor | albums, playlists | concrete `*repository.X` dependencies, no `ctx`, no DTOs, `http.Error` text, every failure a 500 or a blanket 404 |
+Request flow for a write: handler validates the path id (`pathUUID`) and
+decodes a request DTO, the service checks required fields and body-borne
+UUIDs, the repository runs the SQL and turns constraint violations into
+sentinels (`classify`), and `httpx.WriteError` maps the sentinel to 400 / 404 /
+409 and anything else to a logged 500 with a generic body.
 
-- **No tests exist.** `make test` and the CI test step pass vacuously.
+The upload path (`PUT /tracks/{id}/file`) reads the first 512 bytes, sniffs
+the container, streams the body through a SHA-256 hasher into MinIO under
+`tracks/{id}.{ext}`, then records key and hash in one UPDATE. A unique partial
+index on `content_hash` makes a second copy of the same audio a 409. The stream
+path (`GET /tracks/{id}/stream`) stats the object, sets `ETag` from the hash,
+and hands the seekable MinIO object to `http.ServeContent` for ranges and
+conditional requests.
+
+Deletes are "row first, then object": the catalogue is authoritative, and an
+object with no row is sweepable whereas a row with no object is a broken
+track. Artist deletion collects the cascaded tracks' keys inside the
+transaction before the `ON DELETE CASCADE` fires.
 
 ---
 
-## Part 1 — Defects
+## Part 1 — Defects and weaknesses
 
-Severity: **critical** = the endpoint cannot work; **high** = silent data loss
-or a misleading contract; **medium** = correctness or maintainability debt.
+Severity: **high** = data loss, resource exhaustion, or a red build;
+**medium** = a wrong answer, a broken invariant, or a misleading contract;
+**low** = debt.
 
-### D1 — Playlists query a column that does not exist (critical)
 
-`internal/repository/playlistrepo.go` selects, inserts and updates a `song_ids`
-array column on `playlists`. Migration `000004` creates no such column:
-membership lives in the `playlist_tracks` join table, keyed
-`(playlist_id, track_id)` with an ordered `position` and a deferrable
-uniqueness constraint. Every one of the five playlist endpoints fails at
-runtime with `column "song_ids" does not exist`.
+### B2 — A chunked upload buffers ~537 MiB of RAM (high)
 
-`domain.Playlist.SongIDs []string` encodes the same wrong model, and the
-`github.com/lib/pq` dependency exists solely for the `pq.Array` calls here —
-the actual driver is `pgx/v5/stdlib`.
+`internal/storage/minio.go:38` passes `size = -1` for a body without
+`Content-Length` and sets no `PartSize`. minio-go's `OptimalPartInfo(-1, 0)`
+then sizes parts for a 5 TiB object, about 537 MiB each, and buffers a whole
+part in memory before sending it. `MAX_UPLOAD_BYTES` bounds the bytes written,
+not the memory used, so a handful of concurrent chunked uploads exhausts a
+small host. The test `TestUploadAcceptsChunkedBodies` exercises this path with
+a tiny body and cannot see it.
 
-Touches: `internal/repository/playlistrepo.go`, `internal/domain/playlist.go`,
-`go.mod`.
+Fix: set `PutObjectOptions.PartSize` when `size < 0`, sized from the cap
+(`max(16 MiB, MaxUploadBytes/10000)` keeps every allowed upload inside the
+10000-part limit). Consider also setting `NumThreads: 1` to keep one buffer per
+request.
 
-### D2 — Album fields are accepted and then dropped (high)
+Touches: `minio.go` (and `BlobStore.Put` if the cap is threaded through).
 
-`AlbumRepository` only ever touches `id, title, artist_id`:
+### B3 — `POST /artists` accepts an empty name; numeric fields are unbounded (medium)
 
-- `domain.Album.ReleaseYear int` has **no corresponding column** — the schema
-  has `release_date DATE`. A client can post a release year, see it echoed back
-  in the 201 response, and never find it again.
-- `cover_key` is in the schema and in the domain struct but is never read or
-  written, so the cover-art work in Part 3 has nowhere to land.
-- `albums.created_at` exists in the schema and not in the domain struct.
-- `GetAlbumByID` does not map `sql.ErrNoRows` to `domain.ErrNotFound`.
+`internal/service/artistservice.go:33` does no validation, while the album,
+track and playlist services all reject a blank title. `{}` creates an artist
+with `name: ""`. There is also no uniqueness on artists, so the same name can
+be created any number of times, which the future tag-driven upload pipeline
+will do constantly.
 
-Touches: `internal/domain/album.go`, `internal/repository/albumrepo.go`,
-possibly a new migration.
+The track create request accepts negative `duration_ms`, `bitrate`,
+`file_size`, `track_number` and `disc_number`, and a `duration_ms` above
+2^31-1 is a Postgres "integer out of range" (SQLSTATE 22003) that `classify`
+does not know, so it is a 500.
 
-### D3 — Blobs are never deleted, and a failed upload orphans one (high)
+Fix: `requireNonEmpty("name")` in `CreateArtist`; non-negative and range
+checks in `TrackService.CreateTrack`; a unique index on `artists(lower(name))`
+once the find-or-create semantics are decided (see Part 3).
 
-- `DeleteTrack` removes the row and leaves the object in MinIO forever. The
-  track handler holds a `BlobStore` already; it simply does not use it here.
-- Deleting an artist cascades to their tracks in Postgres
-  (`ON DELETE CASCADE`), so the rows vanish and every object behind them is
-  orphaned with no remaining record of its key.
-- In `UploadTrackFile`, if `UpdateStorageKey` fails after `Put` succeeded, the
-  object is written and nothing points at it.
-- Re-uploading a track with a different content type produces a different
-  extension and therefore a different key, orphaning the previous object.
+Touches: `artistservice.go`, `trackservice.go`, `validate.go`, a migration.
 
-Touches: `internal/api/handlers/trackhandler.go`,
-`internal/service/trackservice.go`, `internal/repository/artistrepo.go`.
+### B4 — Unknown paths and wrong methods answer plain text (medium)
 
-### D4 — Three different error contracts (high)
+Verified against `NewRouter`:
 
-`internal/httpx` has exactly the right machinery — `StatusForError` maps the
-domain sentinels, `WriteError` logs unclassified errors in full and answers a
-generic message so SQL text cannot leak — and only the artist handler uses it.
-Elsewhere:
+| Request | Status | Body |
+|---|---|---|
+| `GET /nope` | 404 | `text/plain` "404 page not found" |
+| `PATCH /api/v1/artists/{id}` | 405 | `text/plain` "Method Not Allowed", `Allow: DELETE, GET, HEAD` |
+| `GET /api/v1/artists` | 405 | `text/plain` "Method Not Allowed", `Allow: POST` |
 
-- Track, album and playlist handlers call `http.Error` with plain text, so the
-  documented "errors carry a JSON body" contract holds for one resource in four.
-- `TrackHandler.DeleteTrack` maps *every* error to 500, discarding the
-  `domain.ErrNotFound` the repository correctly returns — deleting a missing
-  track answers 500 instead of 404.
-- `AlbumHandler.CreateAlbum` and `PlaylistHandler.CreatePlaylist` return
-  `err.Error()` straight to the client, which leaks driver and constraint text.
-- `GetAlbum` / `GetPlaylist` answer 404 for any error at all, including a
-  connection failure.
+The README promises one JSON error contract with the 416 on `/stream` as the
+only exception. A wrong method on a known endpoint is an endpoint error and
+should keep the contract.
 
-Touches: all four handlers in `internal/api/handlers/`.
+Fix: register a catch-all `"/"` handler that answers JSON 404, and intercept
+the mux's own 405 (a small `ResponseWriter` wrapper that rewrites a 405 whose
+body the mux is about to write, preserving `Allow`). Add a router test; there
+are none today.
 
-### D5 — Album and playlist layers have no `ctx` and no test seam (medium)
+Touches: `router.go`, new `router_test.go`.
 
-`AlbumService` and `PlaylistService` hold `*repository.AlbumRepository` and
-`*repository.PlaylistRepository` concretely, and no method takes a
-`context.Context`. Two consequences: a client disconnect cannot cancel the
-query, and there is no interface to substitute a fake against, which is
-precisely what the unit tests in Milestone 2 need.
-`TrackRepository.UpdateStorageKey` is the one track method still missing `ctx`.
 
-Touches: `internal/service/albumservice.go`, `playlistservice.go`,
-`trackservice.go`, `internal/repository/trackrepo.go`, `cmd/server/main.go`.
+### B6 — The OpenAPI spec documents the probes at the wrong path (medium)
 
-### D6 — Handlers decode straight into domain structs (medium)
+`@BasePath /api/v1` applies to every `@Router`, so `healthhandler.go:38` and
+`:50` render as `/api/v1/healthz` and `/api/v1/readyz` in the published spec.
+Those paths 404. The spec is deployed to GitHub Pages on every push to `main`.
 
-`internal/api/handlers/dto.go` states the rule and the artist path follows it;
-the track, album and playlist handlers each `json.NewDecoder(r.Body).Decode`
-into `domain.Track` / `domain.Album` / `domain.Playlist`. So a client can set
-server-owned fields — and `CreateTrack` passes a client-supplied `StorageKey`
-into the insert, meaning a caller can point a track row at any object in the
-bucket. The response side has the mirror problem: the domain structs carry no
-JSON tags, so the wire format is Go field names (`ID`, `ArtistID`,
-`CreatedAt`), inconsistent with the artist response's snake_case.
+Fix: drop `@BasePath` and write the full path in each `@Router`, or exclude
+the probes from the spec and document them only in the README. Regenerate with
+`make swagger`.
 
-Touches: `internal/api/handlers/dto.go` and the three handlers.
+### B7 — Artist deletion can orphan an in-flight upload, and there is no sweep (medium)
 
-### D7 — No input validation below the artist path (medium)
+`artistrepo.go:58` collects the tracks' storage keys with a plain SELECT under
+read committed. An upload whose `SetTrackFile` commits after that SELECT and
+before the DELETE has its row cascaded away and its object never collected.
+`artistservice.go:39` says such orphans are for "the orphan sweep" to reclaim.
+No sweep exists: there is no `-gc` flag, no listing of the bucket, nothing
+that compares rows to objects.
 
-`pathUUID` exists and only the artist handler calls it. Everywhere else a
-non-UUID id reaches Postgres and comes back as an unclassified error mapped to
-500 or a misleading 404. There is no validation of non-empty titles, and
-creating an album or track under a non-existent `artist_id` raises a foreign
-key violation that surfaces as a 500 rather than a 400 or 409.
+Fix: `SELECT ... FOR UPDATE` on the tracks rows in `DeleteArtist`, so a
+concurrent `SetTrackFile` waits and then sees zero rows (the handler already
+deletes the object in that case). Then implement the sweep as
+`mydal -gc [-dry-run]`: list the bucket, list `storage_key` values, delete
+objects with no row, and report rows whose object is missing. Every
+"Orphaned object" log line in the codebase is a promise that this exists.
 
-Touches: the three handlers, and validation in the services.
+Touches: `artistrepo.go`, `main.go`, a new `internal/gc` package, `BlobStore`
+gains a `List`.
 
-### D8 — The upload endpoint is fragile (medium)
+### B8 — Catalogue metadata is never reconciled with the uploaded file (medium)
 
-`PUT /tracks/{id}/file`:
+`format`, `file_size`, `bitrate` and `duration_ms` are whatever the client
+claimed at `POST /tracks`. The upload endpoint sniffs the real format and
+streams every byte through a hasher, yet `trackrepo.go:108` records only key
+and hash. `GET /tracks/{id}` can say `"format":"mp3"` for a FLAC, and
+`file_size` for an uploaded track is 0 unless the client guessed.
 
-- requires `Content-Length` and rejects chunked transfer encoding outright;
-- sets **no maximum body size**, so any client can fill the bucket;
-- falls back to an extensionless key for an unrecognised content type, and
-  trusts the client's `Content-Type` header rather than sniffing;
-- computes no content hash, so there is no dedup and no `ETag` source.
+Fix: extend `SetTrackFile` to write `format` and `file_size` (count bytes on
+the way through with an `io.Writer` next to the hasher). Duration and bitrate
+need a probe and belong to the upload pipeline in Part 3. Drop those four
+fields from `createTrackRequest` once the upload sets them, or keep them as
+hints and overwrite on upload.
 
-Touches: `internal/api/handlers/trackhandler.go`.
+### B9 — Streaming makes two HEAD requests before the first byte (medium)
 
-### D9 — Streaming misreports two failures (medium)
+`streamhandler.go:59` calls `Stat`, then `:65` calls `Get`, and `minio.go:55`
+inside `Get` calls `obj.Stat()` again to surface a missing key early. Then
+`http.ServeContent` seeks to the end and back, each of which minio-go turns
+into a request. That is at least two HEADs and two GETs per play, and more
+per range request.
 
-`StreamHandler.StreamTrack` maps every `GetTrackByID` error to 404, so a
-database outage reads as a missing track. When the row exists but the object
-does not, `storage` returns a wrapped `domain.ErrNotFound` that the handler
-turns into a 500. Both cases should go through `httpx.WriteError`. The
-range/seek path itself is correct — `http.ServeContent` over the seekable MinIO
-object handles `Range`, `206`, `If-Range` and `HEAD`.
+Fix: have `Get` return the `ObjectInfo` it already fetched
+(`Get(ctx, key) (io.ReadSeekCloser, ObjectInfo, error)`) and drop the separate
+`Stat` in the handler. Longer term, translate the `Range` header into
+`GetObjectOptions.SetRange` for a single request per play.
 
-Touches: `internal/api/handlers/streamhandler.go`.
+### B10 — Errors are logged twice, without a request id (medium)
 
-### D10 — Playlist mutations silently succeed against nothing (medium)
+Every repository logs failures at `Error` level and returns them; the handler
+then logs the same error again through `WriteError`. Neither line carries the
+`request_id` that the middleware minted, so the two cannot be correlated with
+the access log line. Client mistakes (a foreign key violation in
+`CreatePlaylist`) are also logged at `Error`.
 
-`AddTrack` and `RemoveTrack` issue an `UPDATE` and ignore the row count, so
-adding a track to a playlist that does not exist answers 204. `playlists.updated_at`
-is in the schema and is never written. Both survive the D1 rewrite unless fixed
-with it.
+Fix: log once, at the edge, with the request id (pull it from the context in
+`WriteError`, or carry a request-scoped `*slog.Logger` in the context). Delete
+the repository-level `logger.Error` calls; the wrapped error already names the
+operation.
 
-Touches: `internal/repository/playlistrepo.go`.
+### B11 — JSON bodies are unbounded and lax (medium)
 
-### D11 — The published OpenAPI spec describes a contract the code does not implement (medium)
+The four `json.NewDecoder(r.Body).Decode` sites (`albumhandler.go:68`,
+`artisthandler.go:80`, `trackhandler.go:74`, `playlisthandler.go:71`) read
+without `http.MaxBytesReader`, accept unknown fields silently, and accept
+trailing bytes after the first JSON value. A one-line `decodeJSON` helper with
+a 1 MiB cap, `DisallowUnknownFields`, and a trailing-token check fixes all
+four. Separately, `serve` sets no `ReadTimeout` (correct, because of
+streaming), so a slow upload holds a connection forever; set a read deadline
+in the upload handler via `http.ResponseController` (the recorder's `Unwrap`
+already makes that work).
 
-The annotations claim `domain.Artist` as both the request body and the response
-for the artist endpoints; the real types are `createArtistRequest` and
-`artistResponse`. Every handler documents `{object} map[string]string` failures
-while three of the four actually answer plain text. This spec is published to
-GitHub Pages on every push to `main`, so the wrong contract is the public one.
+### B12 — `internal/api` depends on `cmd/server/docs` (low)
 
-Touches: annotations in all handlers, then `make swagger`.
+`router.go:8` blank-imports the generated docs from under the binary. A
+library package depending on the entry point's generated code inverts the
+dependency direction and drags `swag` into every consumer of the router.
+Move the generated package to `internal/api/docs` (adjust `make swagger` and
+the docs workflow) or register the Swagger handler in `main.go`.
 
-### D12 — No tests, no health endpoints (medium)
+### B13 — Playlist positions lose density when a track is deleted (low)
 
-Zero `_test.go` files. `make test` and CI's test step therefore prove nothing,
-and every fix above lands unverified. There are no `/healthz` or `/readyz`
-endpoints, so compose's `restart: unless-stopped` and any orchestrator have no
-signal beyond "the process is alive".
+`RemoveTrack` renumbers to keep positions a dense `0..n-1`, and the comment
+documents that as an invariant. Deleting a track cascades through
+`playlist_tracks` without renumbering, leaving gaps. Nothing breaks today
+(`AddTrack` uses `MAX+1`, reads order by position), but the reorder endpoint
+planned in Part 3 will assume density. Also, `playlist_tracks(track_id)` has
+no index, so that cascade scans the table.
 
-### D13 — No authentication (known)
+Fix: either drop the density claim or renumber in `DeleteTrack`; add
+`CREATE INDEX playlist_tracks_track_id_idx ON playlist_tracks (track_id)`.
 
-Every endpoint is unauthenticated. The README says so and the constraint is
-accepted for now; it is recorded here because it gates any deployment beyond a
-trusted network, and because retrofitting it after the Subsonic layer would be
-much worse than before.
+### B14 — Configuration edges (low)
+
+- `config.go:69`: `MINIO_USE_SSL` is true only for the literal `true`; use
+  `strconv.ParseBool` and reject garbage.
+- `config.go:110`: any `MODE` other than `production` overwrites an explicit
+  `sslmode` in `DATABASE_URL`. Only set it when absent.
+- An unrecognised `LOG_LEVEL` silently becomes `info`; log a warning.
+- `config.go:36`: the MinIO access key is logged in clear at debug.
+- `-healthcheck` runs `config.Load()` and so fails on a missing
+  `DATABASE_URL` for a reason unrelated to health. Only `ADDR` is needed.
+
+### B15 — Wire-format inconsistencies (low)
+
+- `trackResponse` exposes `storage_key`, which is bucket layout, not API. A
+  `has_file` boolean says what a client needs.
+- `album_id` is omitted when empty but `release_date` is `null` when absent:
+  two conventions for absence in one API. Pick one.
+- 400 and 409 messages carry Postgres constraint names
+  (`conflict: tracks_content_hash_key already exists`). A stable `code`
+  field (`not_found`, `invalid_input`, `conflict`, `duplicate_audio`) beside
+  the message would let clients branch without parsing prose.
+
+### B16 — Storage and HTTP helpers with no caller (low)
+
+`httpx.RespondWithPacket` and `BlobStore.PresignedGetURL` are unused.
+`RespondNoContent` is used by the artist handler while the other six 204 sites
+call `w.WriteHeader` directly. `RespondWithJSON` falls back to a `text/plain`
+`http.Error` when marshalling fails, the one place a non-JSON 500 can come
+from. `storage.notFound` treats every 404 as `ErrNotFound`, so a deleted
+bucket reads as "track not found" instead of an outage.
+
+### B17 — CI and tooling drift (low)
+
+- `ci.yml:67` pins golangci-lint to `latest`; `swagger-docs.yml:24` installs
+  `swag@latest` while `go.mod` pins v1.16.6. Both should match a version.
+- The docs workflow regenerates the spec but never checks the committed copy
+  matches (`git diff --exit-code cmd/server/docs`). They match today.
+- No `gofmt -l` or `go mod tidy` diff check in CI (both clean today).
+- CI builds the image and never runs it; a `docker run ... -healthcheck`
+  smoke test would catch a broken distroless image.
+- `go.mod` says `go 1.25.7` (a patch version) while the Dockerfile uses
+  `golang:1.25-alpine`; the image build relies on toolchain auto-download
+  whenever the tag lags. Prefer `go 1.25` plus a `toolchain` line.
+- `compose.yaml:23` names the MinIO container `mydal`, which is what a reader
+  expects the app container to be called.
+
+### B18 — Test gaps (low)
+
+No tests for the middleware (request id echo, log line, panic recovery and
+the `ErrAbortHandler` passthrough), the router (B4), `config.Load`,
+`MinIOStore` directly (`notFound`, `Ping`), or `migrations.Down`.
+`NewHealthHandler` takes `*sql.DB` rather than `Pinger`, so its test
+constructs the struct by hand. The upload tests use a 4 KiB cap and cannot
+observe B2.
+
+### B19 — No authentication (known, unchanged)
+
+Every endpoint, and the Swagger UI, is open. The README says so. Recorded
+because it gates any deployment beyond a trusted network and because the
+OpenSubsonic layer in Part 3 carries credentials on every request.
 
 ---
 
 ## Part 2 — Sequenced fixes
 
-### Milestone 1 — A harness, then the two schema lies
+### Milestone 1 — Stop losing data and memory
 
-Nothing else should be touched until a broken repository can fail a test.
+1. B1: non-colliding object keys, delete the previous key only after the row
+   commits, test the same-format duplicate case.
+2. B2: `PartSize` for unknown-length uploads.
+3. B7: `FOR UPDATE` in `DeleteArtist`, then the `-gc` sweep.
+4. B5: clear lint, pin the linter.
 
-1. **Repository integration harness.** `testcontainers-go` for Postgres and
-   MinIO (or the compose stack behind a `-short` guard), applying the embedded
-   migrations per run. This is what catches D1 and D2 permanently: both are
-   defects that only a query against the real schema can see.
-2. **Fix D1.** Rewrite `PlaylistRepository` against `playlist_tracks`: insert
-   with `position = COALESCE(MAX(position)+1, 0)`, read membership with a join
-   ordered by position, delete and renumber inside a transaction (the
-   uniqueness constraint is deferrable precisely so a reorder can). Replace
-   `domain.Playlist.SongIDs` with an ordered slice loaded from the join, and
-   drop `github.com/lib/pq` from `go.mod`.
-3. **Fix D10** in the same rewrite: check `RowsAffected` and return
-   `domain.ErrNotFound`; touch `updated_at` on every mutation.
-4. **Fix D2.** Decide the album shape — recommended: keep `release_date DATE`
-   and give the domain a nullable `ReleaseDate`, rather than migrating the
-   column down to a year and losing precision. Select and insert every column,
-   add `CreatedAt`, and map `sql.ErrNoRows` to `domain.ErrNotFound`.
+Exit: a re-upload can never detach a track from its audio; a chunked upload
+costs tens of MiB, not hundreds; `mydal -gc` reports zero orphans after the
+storage tests run.
 
-Exit criteria: every playlist and album endpoint answers correctly against a
-real Postgres, proven by tests that fail if the schema and the queries drift
-apart again.
+### Milestone 2 — Make the contract true everywhere
 
-### Milestone 2 — One contract, everywhere
+1. B3: artist name validation, numeric bounds.
+2. B4: JSON 404 and 405 from the router, with a router test.
+3. B6: correct probe paths in the spec.
+4. B11: bounded, strict JSON decoding; a read deadline on uploads.
+5. B15: `code` field on errors, `has_file`, one absence convention.
 
-Bring tracks, albums and playlists up to the artist path.
+Exit: the README's error paragraph holds for every request the server can
+receive, not only for routed ones, and the published spec has no path that
+404s.
 
-1. **D5:** thread `ctx` through both services and both repositories, declare
-   consumer-side interfaces (`AlbumService`, `PlaylistService`,
-   `AlbumRepository`, `PlaylistRepository`) next to their consumers, and add
-   `ctx` to `UpdateStorageKey`. Rewire `main.go`.
-2. **D4:** replace every `http.Error` with `httpx.WriteError`, and make each
-   repository return the sentinels — `ErrNotFound` from `RowsAffected == 0` and
-   `sql.ErrNoRows`, `ErrConflict` from a unique violation, `ErrInvalidInput`
-   from a foreign key violation (`pgconn.PgError` codes `23505` and `23503`).
-3. **D6:** request and response DTOs for tracks, albums and playlists in
-   `dto.go`, snake_case like `artistResponse`, with server-owned fields
-   unsettable from the wire.
-4. **D7:** `pathUUID` on every id parameter; non-empty title validation in the
-   services returning `domain.ErrInvalidInput`.
-5. **Unit tests** for each handler against fakes, now that the interfaces from
-   step 1 exist.
+### Milestone 3 — Honest metadata and cheaper streaming
 
-Exit criteria: the README's error paragraph — 400 / 404 / 409 / 500 with a JSON
-body — is true of every endpoint, and the caveat about tracks, albums and
-playlists can be deleted.
+1. B8: record sniffed `format` and counted `file_size` on upload.
+2. B9: one stat per play, then range passthrough.
+3. B10: single, correlated error logging.
+4. B13: index and density decision.
 
-### Milestone 3 — Make the storage layer honest
+### Milestone 4 — Hygiene
 
-1. **D3:** delete the object when a track is deleted; delete the object on
-   upload failure; delete the previous object when a track's file is replaced.
-   For artist deletion, collect the affected storage keys inside the
-   transaction *before* the cascade, then remove the objects — and accept that
-   a crash between the two leaves an orphan, which is why the sweep below
-   matters more than the cleanup path.
-2. **Orphan sweep** as a CLI subcommand (`-gc`, alongside `-migrate-only`):
-   objects with no row, rows with no object. This is the durable answer;
-   cleanup-on-error is only the fast path.
-3. **D8:** cap the request body with `http.MaxBytesReader`, accept a streaming
-   upload without `Content-Length` by passing `-1` to `Put` (the `BlobStore`
-   interface already documents that), sniff the type from the first 512 bytes
-   rather than trusting the header, and hash with `io.TeeReader` into a new
-   `tracks.content_hash` column with a unique index.
-4. **D9:** route both stream failures through `httpx.WriteError`, and set
-   `ETag` from the content hash once step 3 provides one.
-
-Exit criteria: deleting everything in the library leaves an empty bucket, and
-the sweep reports zero orphans.
-
-### Milestone 4 — Observability and a true spec
-
-1. **D12:** `/healthz` (process up) and `/readyz` (DB ping plus bucket
-   reachable), wired into compose's healthcheck for the app service.
-2. **D11:** correct every annotation to the DTOs that Milestone 2 introduced,
-   regenerate with `make swagger`, and confirm the GitHub Pages spec matches
-   the implementation.
-3. Raise CI beyond vacuous: fail the build under a coverage floor, and run the
-   repository integration tests from Milestone 1 against the existing service
-   containers.
-
-Exit criteria: `make test` proves something, and the published spec can be
-handed to a client generator without surprises.
+B12, B14, B16, B17, B18. None blocks a user; all reduce the cost of the
+features below.
 
 ---
 
-## Part 3 — Once the defects are gone
+## Part 3 — Roadmap once the defects are gone
 
-The original roadmap, compressed. None of it should start before Milestone 2.
+Unchanged in substance from the previous plan, ordered by leverage.
 
-- **Complete the CRUD.** List endpoints for every resource with keyset
-  pagination on `(created_at, id)` from day one, `PATCH` for metadata edits,
-  `GET /artists/{id}/albums`, `GET /albums/{id}` with its tracks in order, and
-  playlist reorder as `PUT /playlists/{id}/tracks` taking the full ordered list.
-- **Upload pipeline.** `POST /tracks/upload` with `multipart/form-data`
-  streamed straight to the blob store; tag extraction with
-  `github.com/dhowden/tag` plus a duration/bitrate probe behind an interface
-  (`ffprobe` first, pure-Go decoders kept open); find-or-create artist and
-  album inside one transaction, guarded by unique indexes on `artists(lower(name))`
-  and `albums(artist_id, lower(title))`; cover art to `covers/{album_id}`.
-  Milestone 3's hashing already provides the dedup key.
-- **Filesystem scanner.** Point Mydal at `MUSIC_DIR`, walk it and reuse the
-  upload pipeline through a local-filesystem `BlobStore` that references files
-  in place. For most self-hosters this is the *primary* ingestion path and may
-  deserve to come before the HTTP upload.
-- **Serving.** `GET /tracks/{id}/download` with `Content-Disposition`,
-  `GET /albums/{id}/cover` and `GET /artists/{id}/image` with cache headers,
-  and presigned-URL redirects behind a config flag for deployments that prefer
-  MinIO to serve the bytes.
-- **Search and browse.** `GET /search?q=` over a `pg_trgm` GIN index, sort and
-  filter parameters on the list endpoints, a `genre` column from tags, and
-  `GET /stats`.
-- **Authentication (D13).** A single admin API key first, then multi-user with
-  sessions. Everything before this is trusted-network-only.
-- **OpenSubsonic compatibility layer** in its own `internal/subsonic` package,
-  adapting the existing services. The highest-leverage feature in the whole
-  document: dozens of mature clients work the moment it lands. It must come
-  after auth, since the protocol carries credentials on every request.
-- Then, by preference: transcoding and ReplayGain, play history and
-  favourites, smart playlists, an embedded web UI, MusicBrainz lookup, lyrics,
-  multiple artists per track, M3U/JSON export, metrics at `/metrics`.
+- **Complete the CRUD.** List endpoints with keyset pagination on
+  `(created_at, id)`, `PATCH` for metadata, `GET /artists/{id}/albums`,
+  `GET /albums/{id}/tracks` in order, playlist reorder as
+  `PUT /playlists/{id}/tracks` taking the full ordered list (needs B13).
+- **Upload pipeline.** Tag extraction (`github.com/dhowden/tag`), a
+  duration and bitrate probe behind an interface, find-or-create artist and
+  album in one transaction guarded by unique indexes on `artists(lower(name))`
+  and `albums(artist_id, lower(title))`, cover art to `covers/{album_id}`
+  with an upload and a `GET /albums/{id}/cover`. B8 is the first step of this.
+- **Filesystem scanner.** Point Mydal at `MUSIC_DIR` and ingest in place
+  through a local-filesystem `BlobStore`. For most self-hosters this is the
+  primary ingestion path.
+- **Serving.** `GET /tracks/{id}/download` with `Content-Disposition`; a
+  presigned-URL redirect behind a config flag, which is what
+  `PresignedGetURL` was added for.
+- **Search and browse.** `pg_trgm` GIN index and `GET /search?q=`, sort and
+  filter on the list endpoints, a `genre` column from tags, `GET /stats`.
+- **Authentication (B19).** A single admin API key first, then users and
+  sessions. Also gate `/swagger/` behind it or a config flag.
+- **OpenSubsonic layer** in `internal/subsonic`, adapting the existing
+  services. The highest-leverage feature in the document; it must follow auth.
+- Then: transcoding and ReplayGain, play history and favourites, smart
+  playlists, an embedded web UI (needs CORS), MusicBrainz lookup, lyrics,
+  multiple artists per track, M3U export, `/metrics`.
 
 Multi-tenancy is explicitly not a goal; keep it out of the schema.
 
 ---
 
-## Sequencing summary
+## Summary
 
-| Order | Work | Why here |
+| Order | Items | Why here |
 |---|---|---|
-| 1 | Milestone 1 — harness, D1, D2, D10 | Two endpoints are broken against their own schema, and nothing is provable without the harness |
-| 2 | Milestone 2 — D4–D7 | One contract before any new surface is built on the old one |
-| 3 | Milestone 3 — D3, D8, D9 | Stops the library leaking storage before it holds anything worth keeping |
-| 4 | Milestone 4 — D11, D12 | Makes the CI signal and the public spec mean something |
-| 5 | Part 3 features | Safe to build once the foundation stops lying |
+| 1 | B1, B2, B7, B5 | Data loss, memory exhaustion, a red build |
+| 2 | B3, B4, B6, B11, B15 | The documented contract is not yet the whole truth |
+| 3 | B8, B9, B10, B13 | Correct metadata and cheaper, debuggable serving |
+| 4 | B12, B14, B16, B17, B18 | Debt that makes every later feature cheaper |
+| 5 | Part 3 | Safe to build once the foundation stops lying |
