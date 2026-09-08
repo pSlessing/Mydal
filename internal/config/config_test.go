@@ -128,6 +128,10 @@ func TestAddrNeedsOnlyItself(t *testing.T) {
 }
 
 func TestAddrRequiresADDR(t *testing.T) {
+	// Explicitly clear ADDR rather than relying on it being absent from the
+	// process environment: some environments (e.g. CI) set ADDR globally,
+	// which would make this test fail for reasons unrelated to Addr().
+	t.Setenv("ADDR", "")
 	if _, err := Addr(); err == nil {
 		t.Fatal("Addr with no ADDR set: want an error")
 	}
