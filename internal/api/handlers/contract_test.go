@@ -96,7 +96,7 @@ func TestUnclassifiedErrorsDoNotLeak(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	var body map[string]string
-	json.Unmarshal(rec.Body.Bytes(), &body)
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["error"] != "internal server error" {
 		t.Fatalf("leaked detail to the client: %q", body["error"])
 	}

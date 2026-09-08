@@ -45,7 +45,7 @@ func (r *PlaylistRepository) CreatePlaylist(ctx context.Context, p *domain.Playl
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := tx.QueryRowContext(ctx,
 		"INSERT INTO playlists (title, description) VALUES ($1, $2) RETURNING id, created_at, updated_at",
@@ -93,7 +93,7 @@ func (r *PlaylistRepository) AddTrack(ctx context.Context, playlistID, trackID s
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := touchPlaylist(ctx, tx, playlistID); err != nil {
 		return err
@@ -122,7 +122,7 @@ func (r *PlaylistRepository) RemoveTrack(ctx context.Context, playlistID, trackI
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := touchPlaylist(ctx, tx, playlistID); err != nil {
 		return err

@@ -191,7 +191,7 @@ func removeBucket(client *minio.Client, bucket string) {
 	ctx := context.Background()
 	for obj := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{Recursive: true}) {
 		if obj.Err == nil {
-			client.RemoveObject(ctx, bucket, obj.Key, minio.RemoveObjectOptions{})
+			_ = client.RemoveObject(ctx, bucket, obj.Key, minio.RemoveObjectOptions{})
 		}
 	}
 	if err := client.RemoveBucket(ctx, bucket); err != nil {

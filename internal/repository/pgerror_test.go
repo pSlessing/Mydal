@@ -115,8 +115,8 @@ func TestCancellationReachesPostgres(t *testing.T) {
 
 	// Nothing was written despite every call being made.
 	var albumCount, playlistCount int
-	db.QueryRow("SELECT count(*) FROM albums").Scan(&albumCount)
-	db.QueryRow("SELECT count(*) FROM playlists").Scan(&playlistCount)
+	_ = db.QueryRow("SELECT count(*) FROM albums").Scan(&albumCount)
+	_ = db.QueryRow("SELECT count(*) FROM playlists").Scan(&playlistCount)
 	if albumCount != 1 || playlistCount != 1 {
 		t.Fatalf("cancelled writes landed: albums=%d playlists=%d", albumCount, playlistCount)
 	}

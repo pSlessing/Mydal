@@ -74,7 +74,7 @@ func probeReady(addr string) error {
 		return fmt.Errorf("probe /readyz: %w", err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("not ready: /readyz answered %d", resp.StatusCode)
 	}

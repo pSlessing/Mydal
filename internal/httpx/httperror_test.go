@@ -42,7 +42,7 @@ func TestWriteErrorDoesNotLeakUnclassifiedDetail(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 	var body map[string]string
-	json.Unmarshal(rec.Body.Bytes(), &body)
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["error"] != "album 5: not found" {
 		t.Fatalf("classified message lost: %q", body["error"])
 	}
@@ -52,7 +52,7 @@ func TestWriteErrorDoesNotLeakUnclassifiedDetail(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	json.Unmarshal(rec.Body.Bytes(), &body)
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["error"] != "internal server error" {
 		t.Fatalf("leaked: %q", body["error"])
 	}

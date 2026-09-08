@@ -84,7 +84,7 @@ func TestDeletingTheLibraryEmptiesTheBucket(t *testing.T) {
 		}
 	}
 	var rows int
-	db.QueryRow("SELECT count(*) FROM tracks WHERE artist_id = $1", band).Scan(&rows)
+	_ = db.QueryRow("SELECT count(*) FROM tracks WHERE artist_id = $1", band).Scan(&rows)
 	if rows != 0 {
 		t.Errorf("%d track rows survived the cascade", rows)
 	}

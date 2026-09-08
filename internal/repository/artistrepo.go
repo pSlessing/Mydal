@@ -52,7 +52,7 @@ func (r *ArtistRepository) DeleteArtist(ctx context.Context, id string) ([]strin
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		"SELECT storage_key FROM tracks WHERE artist_id = $1 AND storage_key <> ''", id)

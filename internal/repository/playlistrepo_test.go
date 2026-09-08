@@ -164,7 +164,7 @@ func TestDeletePlaylistCascadesMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	db.QueryRow("SELECT count(*) FROM playlist_tracks WHERE playlist_id=$1", p.ID).Scan(&n)
+	_ = db.QueryRow("SELECT count(*) FROM playlist_tracks WHERE playlist_id=$1", p.ID).Scan(&n)
 	if n != 0 {
 		t.Fatalf("%d membership rows survived", n)
 	}
