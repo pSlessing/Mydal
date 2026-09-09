@@ -113,19 +113,27 @@ func (s *MinIOStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 	}, nil
 }
 
-// List returns every object key in the bucket. It exists for the orphan
-// sweep, which is a maintenance path run out-of-band from request handling,
-// so loading the whole listing into memory is acceptable here in a way it
-// would not be on a request path.
-func (s *MinIOStore) List(ctx context.Context) ([]string, error) {
-	var keys []string
+// List returns every object in the bucket. It exists for the orphan sweep,
+// which is a maintenance path run out-of-band from request handling, so
+// loading the whole listing into memory is acceptable here in a way it would
+// not be on a request path.
+//
+// A bucket listing carries no ContentType, so that field is left zero here;
+// the sweep, which is the only caller, does not read it.
+func (s *MinIOStore) List(ctx context.Context) ([]ObjectInfo, error) {
+	var objects []ObjectInfo
 	for obj := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Recursive: true}) {
 		if obj.Err != nil {
 			return nil, fmt.Errorf("list bucket %q: %w", s.bucket, obj.Err)
 		}
-		keys = append(keys, obj.Key)
+		objects = append(objects, ObjectInfo{
+			Key:          obj.Key,
+			Size:         obj.Size,
+			ETag:         obj.ETag,
+			LastModified: obj.LastModified,
+		})
 	}
-	return keys, nil
+	return objects, nil
 }
 
 func (s *MinIOStore) Delete(ctx context.Context, key string) error {

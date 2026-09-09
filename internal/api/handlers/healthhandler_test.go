@@ -28,9 +28,11 @@ func (s stubBlobs) Get(context.Context, string) (io.ReadSeekCloser, storage.Obje
 func (s stubBlobs) Stat(context.Context, string) (storage.ObjectInfo, error) {
 	return storage.ObjectInfo{}, nil
 }
-func (s stubBlobs) Delete(context.Context, string) error   { return nil }
-func (s stubBlobs) List(context.Context) ([]string, error) { return nil, nil }
-func (s stubBlobs) Ping(context.Context) error             { return s.err }
+func (s stubBlobs) Delete(context.Context, string) error { return nil }
+func (s stubBlobs) List(context.Context) ([]storage.ObjectInfo, error) {
+	return nil, nil
+}
+func (s stubBlobs) Ping(context.Context) error { return s.err }
 func (s stubBlobs) PresignedGetURL(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }

@@ -35,9 +35,12 @@ type BlobStore interface {
 	// Stat returns an object's metadata.
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	Delete(ctx context.Context, key string) error
-	// List returns every key currently in the store, for the orphan sweep to
-	// compare against the catalogue.
-	List(ctx context.Context) ([]string, error)
+	// List returns every object currently in the store, for the orphan sweep
+	// to compare against the catalogue. It returns metadata rather than bare
+	// keys because the sweep needs LastModified to tell an object written
+	// seconds ago - by an upload whose row has not committed yet - from one
+	// that has been unreferenced since a crash.
+	List(ctx context.Context) ([]ObjectInfo, error)
 	// Ping reports whether the store is reachable and the bucket usable. It
 	// backs the readiness probe, so it must be cheap.
 	Ping(ctx context.Context) error

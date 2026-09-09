@@ -88,12 +88,36 @@ func (r *TrackRepository) CreateTrack(ctx context.Context, track *domain.Track) 
 // knowable before the cascade removes it, so those (playlist_id, position)
 // pairs are read first, inside the same transaction, and each playlist is
 // renumbered after the delete commits its effect.
+//
+// Reading those positions is only safe while nothing else can move them, so
+// the statement below locks the playlists row behind every membership before
+// the read - the same row lock touchPlaylist takes, which is what serialises
+// this against a concurrent AddTrack or RemoveTrack (and against another
+// DeleteTrack) rather than letting both renumber from stale offsets. The
+// deferrable unique constraint on (playlist_id, position) would not have
+// complained; the sequence would just have decayed. Locking in id order rules
+// out a deadlock with a concurrent delete whose track sits in the same
+// playlists in a different order. The lock is taken by the same UPDATE that
+// stamps updated_at, because a catalogue delete does change the playlist's
+// contents and a client using that stamp as a change marker must see it.
 func (r *TrackRepository) DeleteTrack(ctx context.Context, id string) (string, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE playlists SET updated_at = now()
+		 WHERE id IN (
+			SELECT id FROM playlists
+			 WHERE id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = $1)
+			 ORDER BY id
+			 FOR UPDATE
+		 )`, id,
+	); err != nil {
+		return "", err
+	}
 
 	rows, err := tx.QueryContext(ctx,
 		"SELECT playlist_id, position FROM playlist_tracks WHERE track_id = $1", id)

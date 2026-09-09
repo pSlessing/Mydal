@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"mydal/internal/domain"
@@ -252,3 +254,114 @@ func TestDeleteTrackRenumbersEveryPlaylistItLeaves(t *testing.T) {
 }
 
 func getErr[T any](_ T, err error) error { return err }
+
+// assertDense fails unless the playlist's positions are exactly 0..n-1, which
+// is the invariant RemoveTrack documents and the reorder endpoint will assume.
+func assertDense(t *testing.T, db *sql.DB, playlistID string, want int) {
+	t.Helper()
+	got := positionsOf(t, db, playlistID)
+	if len(got) != want {
+		t.Fatalf("playlist %s has %d members (%v), want %d", playlistID, len(got), got, want)
+	}
+	for i, p := range got {
+		if p != i {
+			t.Fatalf("playlist %s positions = %v, want 0..%d", playlistID, got, want-1)
+		}
+	}
+}
+
+// DeleteTrack read its memberships' positions with a plain SELECT and never
+// took the playlists row lock that touchPlaylist uses to serialise AddTrack
+// and RemoveTrack. Concurrently, its renumber therefore ran from an offset
+// that was already stale - and because the position constraint is deferrable
+// and per-playlist, nothing failed: the 0..n-1 sequence just decayed.
+//
+// DeleteTrack now locks (and stamps) the playlists rows behind its
+// memberships before reading positions, so both interleavings below serialise.
+func TestDeleteTrackKeepsPositionsDenseUnderConcurrency(t *testing.T) {
+	db := testutil.DB(t)
+	ctx := context.Background()
+	tracks := NewTrackRepository(db)
+	playlists := NewPlaylistRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
+
+	for round := range 20 {
+		name := func(s string) string { return fmt.Sprintf("%s-%d", s, round) }
+		a := seedTrack(t, tracks, artistID, name("a"))
+		b := seedTrack(t, tracks, artistID, name("b"))
+		c := seedTrack(t, tracks, artistID, name("c"))
+		d := seedTrack(t, tracks, artistID, name("d"))
+		e := seedTrack(t, tracks, artistID, name("e"))
+
+		// A delete racing an append: the append must not compute its MAX+1
+		// from positions the renumber is about to shift.
+		appended := &domain.Playlist{Title: name("appended"), TrackIDs: []string{a, b, c}}
+		if err := playlists.CreatePlaylist(ctx, appended); err != nil {
+			t.Fatal(err)
+		}
+		// Two deletes of members of one playlist: the second must renumber
+		// from the position it reads after the first commits, not before.
+		twice := &domain.Playlist{Title: name("twice"), TrackIDs: []string{a, b, c, d}}
+		if err := playlists.CreatePlaylist(ctx, twice); err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		var deleteBErr, addErr, deleteCErr error
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			_, deleteBErr = tracks.DeleteTrack(ctx, b)
+		}()
+		go func() {
+			defer wg.Done()
+			addErr = playlists.AddTrack(ctx, appended.ID, e)
+		}()
+		go func() {
+			defer wg.Done()
+			_, deleteCErr = tracks.DeleteTrack(ctx, c)
+		}()
+		wg.Wait()
+
+		for _, err := range []error{deleteBErr, addErr, deleteCErr} {
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+
+		// appended: a, e remain of {a, b, c} plus the appended e.
+		assertDense(t, db, appended.ID, 2)
+		// twice: a, d remain of {a, b, c, d}.
+		assertDense(t, db, twice.ID, 2)
+	}
+}
+
+// A catalogue delete changes a playlist's contents, so a client polling
+// updated_at as a change marker has to see it move.
+func TestDeleteTrackStampsThePlaylistsItLeaves(t *testing.T) {
+	db := testutil.DB(t)
+	ctx := context.Background()
+	tracks := NewTrackRepository(db)
+	playlists := NewPlaylistRepository(db)
+	artistID := seedArtist(t, NewArtistRepository(db))
+
+	a := seedTrack(t, tracks, artistID, "stamp-a")
+	b := seedTrack(t, tracks, artistID, "stamp-b")
+	p := &domain.Playlist{Title: "Stamped", TrackIDs: []string{a, b}}
+	if err := playlists.CreatePlaylist(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := tracks.DeleteTrack(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := playlists.GetPlaylistByID(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.UpdatedAt.After(p.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want later than %v after a member was deleted",
+			got.UpdatedAt, p.UpdatedAt)
+	}
+}

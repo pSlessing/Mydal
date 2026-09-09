@@ -56,3 +56,25 @@ func (r *AlbumRepository) DeleteAlbum(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// AllCoverKeys returns the cover_key of every album that has one, for the
+// orphan sweep. Nothing uploads a cover yet, but the column round-trips
+// through this repository, so the day it does the sweep must already know
+// those objects are referenced - otherwise its first run deletes every cover
+// in the bucket.
+func (r *AlbumRepository) AllCoverKeys(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT cover_key FROM albums WHERE cover_key <> ''")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}

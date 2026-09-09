@@ -125,9 +125,18 @@ reports ready, which is what compose runs.
 
 Deletes are row-first-then-object, so a crash between the two can leave a
 storage object nothing references. `mydal -gc` reclaims those: it lists the
-bucket, lists every track's `storage_key`, deletes objects with no row, and
-logs any row whose object is missing (a broken track it cannot fix). Add
-`-dry-run` to see the report without deleting anything.
+bucket, then lists every key the catalogue references (`tracks.storage_key`
+and `albums.cover_key`), deletes the objects nothing references, and logs any
+key whose object is missing (a broken track it cannot fix). Add `-dry-run` to
+see the report without deleting anything.
+
+It is safe to run against a live server. An upload writes its object before it
+commits the row that names it, so two rules keep it from deleting one:
+the bucket is listed **before** the catalogue is read, so a row that commits
+mid-sweep still counts; and any unreferenced object written in the last hour
+is left alone regardless, which covers an upload that had not written its
+object yet when the listing ran. That hour is comfortably longer than the 15
+minutes an upload body is given to arrive.
 
 ## Tests
 

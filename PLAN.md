@@ -13,6 +13,17 @@ regenerating the OpenAPI spec into a scratch directory (no drift from the
 committed one). The integration tests were **not** run here: they need a
 Postgres and a MinIO, and neither was up on this machine. CI runs them.
 
+A second pass on 2026-09-09 re-read every source and test file against the
+fixed tree, with `go build`, `go vet`, `go test -short` and
+`golangci-lint run` (v2.13.2) all green. It found nine defects the first
+audit missed, recorded below as B20 to B28. None is a red build; two are
+concurrency holes the single-threaded tests cannot see, one is a data-loss
+path in the maintenance command, and the rest are contract and hygiene
+gaps. The integration tests were again not run locally.
+
+B20 and B21 have since been fixed and pinned; B22 to B28 remain, alongside
+B19.
+
 ---
 
 ## Part 0 — How it works
@@ -66,6 +77,199 @@ Every endpoint, and the Swagger UI, is open. The README says so. Recorded
 because it gates any deployment beyond a trusted network and because the
 OpenSubsonic layer in Part 3 carries credentials on every request.
 
+### B20 — `mydal -gc` could delete the object an in-flight upload was about to commit (high, fixed)
+
+`runOrphanSweep` (`main.go:195`) reads every `storage_key` first, then
+`gc.Sweep` lists the bucket (`gc.go:41`). An upload whose `Put` lands
+between those two calls is in the listing but not in the key set, so the
+sweep deletes it; the upload's `SetTrackFile` then commits a row that points
+at nothing. Swapping the order narrows the window but does not close it: an
+object written before the listing whose row commits after the key read is
+still an orphan by the sweep's definition. The README presents `-gc` as a
+routine maintenance command and says nothing about stopping the server
+first, and `MinIOStore.List` (`minio.go:120`) throws away the
+`LastModified` that would let the sweep tell a fresh object from a stale
+one.
+
+Two smaller holes in the same code: the sweep compares the bucket against
+`tracks.storage_key` only, so the day `albums.cover_key` gets an upload path
+(the repository already round-trips the column) every cover object is an
+orphan to it; and objects are the only thing it looks at, see B27 for the
+multipart parts it cannot see.
+
+Fixed. `BlobStore.List` returns `[]ObjectInfo`, so the sweep sees
+`LastModified`. `gc.Sweep` now takes the catalogue read as a callback
+(`ReferencedKeys`) and calls it *after* listing the bucket, which puts the
+ordering in the sweep rather than in its caller, and skips any unreferenced
+object younger than a grace window - `gcGracePeriod`, one hour, against the
+15 minutes of `uploadReadTimeout` - reporting those as `Report.Skipped`.
+`runOrphanSweep` feeds `albums.cover_key` (new `AlbumRepository.AllCoverKeys`)
+into the referenced set alongside `tracks.storage_key`.
+
+Flipping the order opened the mirror case - a key that commits after the
+listing names an object the listing could not have seen - so a referenced key
+absent from the listing is now `Stat`ed before being reported as missing.
+
+Pinned by four tests in `gc_test.go`: a fresh unreferenced object is skipped
+and not deleted; a row that commits between the listing and the key read is
+not swept; a key whose object appears after the listing is not reported
+missing; a cover key keeps its object. The README now says `-gc` is safe
+against a live server, and why.
+
+Still open from this entry: B27, the incomplete multipart uploads no listing
+can see.
+
+### B21 — Playlist positions lost density under concurrent mutation (medium, fixed)
+
+B13 closed the single-threaded gap. Under concurrency it is open again:
+`DeleteTrack` (`trackrepo.go:98`) reads `(playlist_id, position)` with a
+plain SELECT and never takes the `playlists` row lock that `touchPlaylist`
+(`playlistrepo.go:144`) uses to serialise `AddTrack` and `RemoveTrack`.
+Three interleavings each leave a gap:
+
+- `DeleteTrack` against `RemoveTrack` on the same playlist: the delete's
+  position is stale by the time its renumber runs, so the rows past the
+  removed one are shifted from the wrong offset.
+- `DeleteTrack` against `AddTrack`: the append computes `MAX+1` before the
+  renumber commits and lands one past the end.
+- Two `DeleteTrack`s of tracks in the same playlist: the second waits on
+  the first's row locks, then renumbers from the position it read before
+  the wait.
+
+The deferrable unique constraint makes none of this an error, so the
+invariant silently decays until the reorder endpoint in Part 3 assumes it.
+Related: a catalogue delete changes a playlist's contents without touching
+its `updated_at`, so a client using that stamp as a change marker misses it.
+
+Fixed. `DeleteTrack` opens with one statement that both takes the lock and
+bumps the stamp: `UPDATE playlists SET updated_at = now() WHERE id IN (SELECT
+id FROM playlists WHERE id IN (<the track's playlists>) ORDER BY id FOR
+UPDATE)`. The inner ordered `FOR UPDATE` rules out a deadlock with a
+concurrent delete whose track sits in the same playlists in another order, and
+the lock is the same `playlists` row lock `touchPlaylist` takes, so all three
+interleavings above now serialise. The `updated_at` bump closes the related
+gap in the same statement.
+
+Pinned by two integration tests in `playlistrepo_test.go`: a 20-round race
+harness running `DeleteTrack`, `AddTrack` and a second `DeleteTrack` against
+overlapping playlists, asserting positions are exactly `0..n-1` after every
+round; and one asserting `updated_at` moves when a member is deleted from the
+catalogue. Both fail against the previous `DeleteTrack` (positions `[0 2]`, an
+unchanged stamp) and pass under `-race`.
+
+### B22 — A keyword/value `DATABASE_URL` is corrupted, and its password logged (medium)
+
+pgx accepts both `postgres://...` and `host=... user=... password=...`, and
+the README asks only for "a Postgres DSN". `config.Load` (`config.go:140`)
+runs the keyword form through `url.Parse`, which does not fail on it, then
+re-encodes it as `host=localhost%20user=...?sslmode=disable` (checked with
+the standard library). Outside production the server therefore cannot
+connect to a database given in that form, with an error that blames the
+DSN rather than the rewrite. `redactURL` (`config.go:50`) has the same
+blind spot: with no userinfo to redact, the password is logged in clear by
+`logger.Debug("Configuration loaded", ...)`.
+
+Adjacent, and worth fixing in the same pass: `MODE` is never validated.
+`prod`, `Production` or a stray space all mean "not production" and force
+`sslmode=disable` onto a DSN that named no mode - the opposite of what the
+operator meant, and silent.
+
+Fix: parse with `pgconn.ParseConfig` (already a dependency), which
+understands both forms; apply the sslmode default only when the parsed
+config has none, and render the redacted form from the parsed struct
+instead of guessing at the string. Reject any `MODE` other than
+`development` or `production`. Test: a keyword DSN round-trips unchanged
+apart from the added `sslmode`, and its password never appears in
+`LogValue`.
+
+### B23 — A `urn:uuid:` id passes validation and reaches Postgres as a 500 (low)
+
+`pathUUID` (`artisthandler.go:33`) and `requireUUID` (`validate.go:23`)
+accept whatever `uuid.Parse` accepts, which includes the
+`urn:uuid:xxxxxxxx-...` form. Postgres accepts braces and hyphen-less hex
+but not the URN prefix, so `GET /tracks/urn:uuid:<id>` is SQLSTATE 22P02,
+which `classify` does not know, and so a 500 with an error log - the exact
+outcome those two validators exist to prevent.
+
+Fix: both return `parsed.String()` and callers use the canonical form, which
+also normalises the brace and hyphen-less spellings before they reach a
+query or an error message. Test: the URN form in `contract_test.go` and
+`validate_test.go` is either a 404 or a 400, never a 500.
+
+### B24 — Concurrent re-uploads to one track orphan an object silently (low)
+
+Two `PUT /tracks/{id}/file` requests for the same track both read the same
+`previousKey` (`trackhandler.go:122`). Each writes a fresh object; the first
+`SetTrackFile` wins and deletes the previous key; the second wins too (same
+row, so the hash index does not object), deletes the already-gone previous
+key, and leaves the first request's object with no row and no log line.
+Only B20's sweep would ever find it, and B20 says that sweep is not yet safe
+to run.
+
+Fix: `SetTrackFile` returns the key it displaced (`UPDATE ... RETURNING
+(SELECT storage_key FROM tracks WHERE id = $5)`, evaluated before the
+assignment) and the handler deletes that instead of what it read earlier.
+Test: two uploads to one track in parallel leave exactly one object in the
+bucket.
+
+### B25 — Client faults on the write paths answer with the wrong status (low)
+
+Three cases, each a client mistake that comes back as something else:
+
+- `decodeJSON` (`decode.go:26`) folds `MaxBytesError` into "malformed JSON
+  body", a 400, while the upload endpoint answers 413 for the same fault.
+- An upload whose body ends before its declared `Content-Length` fails
+  inside minio-go with an unexpected EOF, which `trackhandler.go:187`
+  reports as a 500 and logs as an error.
+- `CreatePlaylist` with the same track twice in `track_ids` trips the
+  membership primary key, so the client sees a 409 whose message names
+  `playlist_tracks_pkey`, for what is a malformed request.
+
+Fix: check for `MaxBytesError` in `decodeJSON` and answer 413; treat an
+`io.ErrUnexpectedEOF` from `Put` as a 400; reject duplicate `track_ids` in
+`PlaylistService.CreatePlaylist` before the INSERT. Pin each.
+
+### B26 — A client-supplied `X-Request-Id` is trusted verbatim (low)
+
+`RequestID` (`middleware.go:52`) echoes whatever the header holds into the
+response and into every log line for the request: any bytes, any length up
+to the server's 1 MiB header cap. Since the log is JSON the damage is bulk
+and noise rather than injection, but a correlation id should not be an
+attacker-sized payload.
+
+Fix: accept it only if it is short (128 bytes is plenty) and drawn from a
+safe set (`[A-Za-z0-9._-]`); otherwise generate one as if it were absent.
+Test: an oversized or hostile header gets a generated id back.
+
+### B27 — Incomplete multipart uploads are never reclaimed (low)
+
+minio-go aborts a multipart upload when `Put` fails, so a client disconnect
+is clean. A process that dies mid-upload is not: the parts stay in the
+bucket, invisible to `ListObjects` and therefore to `-gc`, and count against
+storage forever. That is not a remote case here. `serve` (`main.go:284`)
+gives shutdown 30 seconds while an upload may legitimately run for the 15
+minutes of `uploadReadTimeout`; `http.Server.Shutdown` does not cancel
+handler contexts, so a SIGTERM during a large upload always ends in a
+timeout, an exit with error, and an abandoned multipart upload. The
+orchestrator's SIGKILL is the same story without the log line.
+
+Fix: have `-gc` also list incomplete multipart uploads older than the B20
+grace window and abort them (`ListIncompleteUploads` plus
+`AbortMultipartUpload`, or a bucket lifecycle rule set once in
+`ensureBucket`). Consider a `BaseContext` on the server that is cancelled
+at shutdown so an in-flight upload fails fast and minio-go's own abort runs.
+
+### B28 — `cover_key` is on the wire while `storage_key` is deliberately not (low)
+
+`dto.go:111` refuses `cover_key` on input "for the same reason as
+StorageKey: it names an object in the bucket", and B15 replaced
+`storage_key` in the track response with `has_file` for that reason. The
+album response (`dto.go:132`) still exposes `cover_key`, and the
+snake-case test pins it. One convention, please, before the cover upload
+in Part 3 makes it a real value.
+
+Fix: `has_cover` bool in `albumResponse`; update `dto_test.go`.
+
 ---
 
 ## Part 2 — Sequenced fixes
@@ -105,6 +309,24 @@ receive, not only for routed ones, and the published spec has no path that
 
 B12, B14, B16, B17, B18. None blocks a user; all reduce the cost of the
 features below.
+
+### Milestone 5 — Second-pass defects
+
+1. ~~B20: list before keys, `LastModified` through `List`, a grace window,
+   `cover_key` in the referenced set.~~ Done; `-gc` is safe against a live
+   server and the README says so.
+2. B22: parse the DSN with pgconn, validate `MODE`.
+3. ~~B21: lock the playlist rows in `DeleteTrack`, bump `updated_at`, race
+   test.~~ Done.
+4. B23, B24, B25: canonical ids, displaced key from `SetTrackFile`, honest
+   client-fault statuses.
+5. B26, B27, B28: bounded request ids, multipart cleanup and a cancellable
+   server context, `has_cover`.
+
+Exit: `-gc` run against a server mid-upload deletes nothing it should not;
+a keyword DSN works in development and never logs its password; the
+playlist race test passes with `-race`; no input that passes validation can
+produce a 500.
 
 ---
 
@@ -149,4 +371,6 @@ Multi-tenancy is explicitly not a goal; keep it out of the schema.
 | 2 | B3, B4, B6, B11, B15 | The documented contract is not yet the whole truth |
 | 3 | B8, B9, B10, B13 | Correct metadata and cheaper, debuggable serving |
 | 4 | B12, B14, B16, B17, B18 | Debt that makes every later feature cheaper |
-| 5 | Part 3 | Safe to build once the foundation stops lying |
+| 5 | ~~B20~~, B22, ~~B21~~ | Found on the second pass: a data-loss path in `-gc` (fixed), a broken DSN form, a concurrency hole (fixed) |
+| 6 | B23, B24, B25, B26, B27, B28 | Second-pass contract and hygiene gaps |
+| 7 | Part 3 | Safe to build once the foundation stops lying |

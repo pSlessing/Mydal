@@ -50,6 +50,14 @@ const (
 	connMaxLifetime = 5 * time.Minute
 
 	healthcheckTimeout = 3 * time.Second
+
+	// gcGracePeriod is how young an unreferenced object may be and still be
+	// left alone by -gc. An upload writes its object before it commits the
+	// row naming it, and may take up to handlers.uploadReadTimeout (15
+	// minutes) to arrive, so anything shorter than that risks deleting an
+	// object an in-flight upload is about to point a row at. An hour leaves
+	// generous headroom; an orphan an hour older costs nothing to wait for.
+	gcGracePeriod = time.Hour
 )
 
 func main() {
@@ -186,17 +194,29 @@ func run(bootstrap *slog.Logger) error {
 	return serve(ctx, cfg.Addr, router, logger)
 }
 
-// runOrphanSweep lists the bucket, lists every track's storage_key, deletes
-// objects with no row unless dryRun, and reports rows whose object is
-// missing. Every "Orphaned object" log line elsewhere in the codebase is a
-// promise that this exists.
+// runOrphanSweep lists the bucket, then lists every key the catalogue
+// references, deletes the objects nothing references unless dryRun, and
+// reports rows whose object is missing. Every "Orphaned object" log line
+// elsewhere in the codebase is a promise that this exists.
+//
+// The catalogue read is a callback so that gc.Sweep, not this function, fixes
+// the order: reading the keys first would let an upload that lands between
+// the two calls look like an orphan and be deleted out from under the row it
+// is about to commit.
 func runOrphanSweep(ctx context.Context, db *sql.DB, blobs storage.BlobStore, dryRun bool, logger *slog.Logger) error {
-	storageKeys, err := repository.NewTrackRepository(db).AllStorageKeys(ctx)
-	if err != nil {
-		return fmt.Errorf("list track storage keys: %w", err)
+	referenced := func(ctx context.Context) ([]string, error) {
+		storageKeys, err := repository.NewTrackRepository(db).AllStorageKeys(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list track storage keys: %w", err)
+		}
+		coverKeys, err := repository.NewAlbumRepository(db).AllCoverKeys(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list album cover keys: %w", err)
+		}
+		return append(storageKeys, coverKeys...), nil
 	}
 
-	report, sweepErr := gc.Sweep(ctx, blobs, storageKeys, dryRun)
+	report, sweepErr := gc.Sweep(ctx, blobs, referenced, gcGracePeriod, dryRun)
 	if sweepErr != nil {
 		logger.Error("Orphan sweep failed to delete some objects", "error", sweepErr)
 	}
@@ -208,10 +228,14 @@ func runOrphanSweep(ctx context.Context, db *sql.DB, blobs storage.BlobStore, dr
 		logger.Info(action, "storage_key", key)
 	}
 	for _, key := range report.Missing {
-		logger.Warn("Track references a missing object", "storage_key", key)
+		logger.Warn("Catalogue references a missing object", "storage_key", key)
+	}
+	for _, key := range report.Skipped {
+		logger.Debug("Unreferenced object is too recent to sweep", "storage_key", key)
 	}
 	logger.Info("Orphan sweep complete",
-		"orphaned", len(report.Orphaned), "missing", len(report.Missing), "dry_run", dryRun)
+		"orphaned", len(report.Orphaned), "missing", len(report.Missing),
+		"skipped", len(report.Skipped), "dry_run", dryRun)
 	return sweepErr
 }
 
